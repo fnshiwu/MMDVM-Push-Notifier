@@ -161,7 +161,6 @@ class PushService:
 
     @classmethod
     def shutdown(cls):
-        # [atexit 钩子逻辑实现]
         cls._executor.shutdown(wait=True)
 
 # 注册 atexit 钩子
@@ -214,6 +213,14 @@ class MMDVMMonitor:
                 alert_body = (f"🚨 **硬件高温预警**\n🔥 **当前温度**: {display_str}\n⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
                 PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
 
+    def get_latest_log(self):
+        """[优化版引入] 获取最新的日志文件"""
+        log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
+        if not log_files: return None
+        # 排除空文件并获取最新
+        log_files = [f for f in log_files if os.path.getsize(f) > 0]
+        return max(log_files, key=os.path.getmtime) if log_files else None
+
     def run(self):
         conf = ConfigManager.get_config()
         for i in range(10):
@@ -225,24 +232,29 @@ class MMDVMMonitor:
             temp_str, _ = self.get_current_temp(conf)
             body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
+
         while True:
             try:
-                log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
-                if not log_files: time.sleep(5); continue
-                current_log = max(log_files, key=os.path.getmtime)
+                current_log = self.get_latest_log()
+                if not current_log:
+                    time.sleep(5)
+                    continue
                 
-                # 获取当前 UTC 日期，用于判断跨天（UTC 0点轮转）
-                last_log_date = datetime.now(timezone.utc).date()
-                
+                last_rotation_check = time.time()
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在读取日志: {os.path.basename(current_log)}")
+
                 with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
                     f.seek(0, 2)
                     while True:
-                        # 检查 UTC 日期是否跨天
-                        current_utc_date = datetime.now(timezone.utc).date()
-                        if current_utc_date != last_log_date:
-                            # 触发轮转，跳出内循环重新打开文件
-                            break
-                        
+                        # --- [优化版核心逻辑：每5秒物理检查磁盘文件变化] ---
+                        now = time.time()
+                        if now - last_rotation_check > 5:
+                            last_rotation_check = now
+                            new_log = self.get_latest_log()
+                            if new_log and new_log != current_log:
+                                print(f"[{datetime.now().strftime('%H:%M:%S')}] 检测到日志轮转: {os.path.basename(new_log)}")
+                                break # 跳出内循环，重新进入外循环打开新文件句柄
+
                         line = f.readline()
                         if not line:
                             time.sleep(0.1)
@@ -250,7 +262,9 @@ class MMDVMMonitor:
                         self.process_line(line)
             except (FileNotFoundError, PermissionError, OSError):
                 time.sleep(1); continue
-            except Exception: time.sleep(5)
+            except Exception as e:
+                print(f"运行时异常: {e}")
+                time.sleep(5)
 
     def process_line(self, line):
         if "end of" not in line.lower(): return
