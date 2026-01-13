@@ -1,7 +1,7 @@
 [Unit]
 Description=MMDVM Log Push Notifier
 # 确保在网络就绪后再启动
-After=network-online.target
+After=network-online.target mmdvmhost.service
 Wants=network-online.target
 
 [Service]
