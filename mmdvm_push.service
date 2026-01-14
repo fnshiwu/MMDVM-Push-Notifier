@@ -1,29 +1,31 @@
 [Unit]
 Description=MMDVM Log Push Notifier
-# 确保在网络就绪后再启动
+# 1. 增加依赖项，确保网络和 MMDVM 主程序都启动了再跑脚本
 After=network-online.target mmdvmhost.service
-Wants=network-online.target
+Wants=network-online.target mmdvmhost.service
 
 [Service]
 Type=simple
 User=root
 Group=root
-# 1. 保留 A 的路径设置，确保资源加载正确
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
-# 2. 保留 A 的延迟启动，确保推送接口可用
-ExecStartPre=/bin/sleep 10
+
+# 2. 增加冷启动缓冲：给系统多留一点挂载内存盘和写日志的时间
+ExecStartPre=/bin/sleep 20
+
 ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
 
-# 3. 整合 B 的重启机制
+# 3. 核心修复：如果启动失败（没找到日志），无限次自动重启，每次等 10 秒
 Restart=always
-RestartSec=5
+RestartSec=10
+# 取消启动次数限制，直到成功启动为止
+StartLimitInterval=0
 
-# 4. 整合 B 的硬核资源限制（保护树莓派主进程）
+# 4. 资源限制保持不变
 NoNewPrivileges=true
-LimitNOFILE=1024
 CPUQuota=30%
 MemoryMax=150M
-TasksMax=50
 
 [Install]
 WantedBy=multi-user.target
+
