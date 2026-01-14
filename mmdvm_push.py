@@ -5,7 +5,7 @@ from functools import lru_cache
 from threading import Semaphore
 
 # --- 核心版本号 ---
-VERSION = "v3.0.15-S"
+VERSION = "v3.0.18"
 
 # --- [修复网页端调用] ---
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
