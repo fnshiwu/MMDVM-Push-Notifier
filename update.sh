@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 核心更新脚本 (v3.0.12)
+# MMDVM-Push-Notifier 核心更新脚本 (v3.0.15)
 
 echo "--- 开始执行一键更新流程 ---"
 
@@ -45,5 +45,5 @@ sudo systemctl restart mmdvm_push.service
 
 echo "--- 更新完成 ---"
 # 显示版本号确认更新成功
-python3 mmdvm_push.py --version 2>/dev/null || echo "当前版本: v3.0.12"
+python3 mmdvm_push.py --version 2>/dev/null || echo "当前版本: v3.0.15"
 sudo systemctl status mmdvm_push.service --no-pager
