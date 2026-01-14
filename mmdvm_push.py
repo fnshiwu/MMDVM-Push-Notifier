@@ -5,7 +5,7 @@ from functools import lru_cache
 from threading import Semaphore
 
 # --- 核心版本号 ---
-VERSION = "v3.0.9"
+VERSION = "v3.0.10"
 
 # --- [修复网页端调用] ---
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
@@ -38,6 +38,16 @@ class ConfigManager:
         except Exception: pass
         return cls._config
 
+    @staticmethod
+    def parse_list(data):
+        """解析名单：支持中英文分号、逗号、空格或换行分隔"""
+        if isinstance(data, list):
+            data = ";".join(map(str, data))
+        if not data or not isinstance(data, str):
+            return []
+        # 正则匹配：英文分号、中文分号、英文逗号、中文逗号、空格、换行
+        return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
+
 class HamInfoManager:
     def __init__(self, id_file):
         self.id_file = id_file
@@ -55,7 +65,7 @@ class HamInfoManager:
             "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "Germany": "🇩🇪 德国",
             "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
-            "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦🇹 奥地利", "Sweden": "🇸🇪 瑞典",
+            "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦ᵗ 奥地利", "Sweden": "🇸🇪 瑞典",
             "Norway": "🇳🇴 挪威", "Denmark": "🇩麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
             "Czech Republic": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰",
             "Romania": "🇷🇴 罗马尼亚", "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
@@ -163,7 +173,6 @@ class PushService:
     def shutdown(cls):
         cls._executor.shutdown(wait=True)
 
-# 注册 atexit 钩子
 atexit.register(PushService.shutdown)
 
 class MMDVMMonitor:
@@ -214,11 +223,7 @@ class MMDVMMonitor:
                 PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
 
     def get_latest_log(self):
-        """[优化版引入] 获取最新的日志文件"""
-        log_files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
-        if not log_files: return None
-        # 排除空文件并获取最新
-        log_files = [f for f in log_files if os.path.getsize(f) > 0]
+        log_files = [f for f in glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log")) if os.path.getsize(f) > 0]
         return max(log_files, key=os.path.getmtime) if log_files else None
 
     def run(self):
@@ -232,29 +237,20 @@ class MMDVMMonitor:
             temp_str, _ = self.get_current_temp(conf)
             body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
-
         while True:
             try:
                 current_log = self.get_latest_log()
-                if not current_log:
-                    time.sleep(5)
-                    continue
+                if not current_log: time.sleep(5); continue
                 
-                last_rotation_check = time.time()
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] 正在读取日志: {os.path.basename(current_log)}")
-
                 with open(current_log, "r", encoding="utf-8", errors="ignore") as f:
                     f.seek(0, 2)
+                    last_check = time.time()
                     while True:
-                        # --- [优化版核心逻辑：每5秒物理检查磁盘文件变化] ---
-                        now = time.time()
-                        if now - last_rotation_check > 5:
-                            last_rotation_check = now
+                        if time.time() - last_check > 5:
                             new_log = self.get_latest_log()
-                            if new_log and new_log != current_log:
-                                print(f"[{datetime.now().strftime('%H:%M:%S')}] 检测到日志轮转: {os.path.basename(new_log)}")
-                                break # 跳出内循环，重新进入外循环打开新文件句柄
-
+                            if new_log and new_log != current_log: break
+                            last_check = time.time()
+                        
                         line = f.readline()
                         if not line:
                             time.sleep(0.1)
@@ -262,9 +258,7 @@ class MMDVMMonitor:
                         self.process_line(line)
             except (FileNotFoundError, PermissionError, OSError):
                 time.sleep(1); continue
-            except Exception as e:
-                print(f"运行时异常: {e}")
-                time.sleep(5)
+            except Exception: time.sleep(5)
 
     def process_line(self, line):
         if "end of" not in line.lower(): return
@@ -277,9 +271,13 @@ class MMDVMMonitor:
         dur = float(match.group('dur'))
 
         if self.is_quiet_time(conf): return
-        focus = conf.get('focus_list', [])
+        
+        # 解析黑白名单
+        focus = ConfigManager.parse_list(conf.get('focus_list', []))
+        ignore = ConfigManager.parse_list(conf.get('ignore_list', []))
+        
         if focus and call not in focus: return
-        if call == conf.get('my_callsign') or call in conf.get('ignore_list', []) or dur < conf.get('min_duration', 1.0):
+        if call == conf.get('my_callsign') or call in ignore or dur < conf.get('min_duration', 1.0):
             return
 
         curr_ts = time.time()
