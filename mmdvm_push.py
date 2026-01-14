@@ -96,7 +96,7 @@ class HamInfoManager:
             "Oman": "🇴🇲 阿曼", "Qatar": "🇶🇦 卡塔尔", "Jordan": "🇯🇴 约旦", "Lebanon": "🇱🇧 黎巴嫩",
             "Kazakhstan": "🇰🇿 哈萨克斯坦", "Uzbekistan": "🇺🇿 乌兹别克斯坦",
             "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "Germany": "🇩🇪 德国",
-            "France": "🇫🇷 法国", "Italy": "🇮ᵗ 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵ᵗ 葡萄牙",
+            "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", "Portugal": "🇵🇹 葡萄牙",
             "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", "Netherlands": "🇳🇱 荷兰",
             "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", "Austria": "🇦ᵗ 奥地利", "Sweden": "🇸🇪 瑞典",
             "Norway": "🇳🇴 挪威", "Denmark": "🇩🇲 丹麦", "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
@@ -113,7 +113,7 @@ class HamInfoManager:
             "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
             "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
             "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", "Kenya": "🇰🇪 肯尼亚",
-            "Morocco": "🇲🇦 摩纳哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪ᵗ 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
+            "Morocco": "🇲🇦 摩纳哥", "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
         }
 
@@ -169,7 +169,7 @@ class HamInfoManager:
             self._io_lock.release()
 
 # =========================
-# Push Service (S-level)
+# Push Service
 # =========================
 class PushService:
     _executor = ThreadPoolExecutor(max_workers=PUSH_MAX_WORKERS)
@@ -240,41 +240,37 @@ class MMDVMMonitor:
             re.IGNORECASE
         )
 
-    # -------- 启动推送：网页端测试属于此范畴，改为实时同步推送 --------
-    def push_boot_info(self):
-        conf = ConfigManager.get_config()
-        if not conf.get("boot_push_enabled", True):
-            return
-
+    def get_sys_info(self):
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
             cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
             mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'")
             with open("/sys/class/thermal/thermal_zone0/temp") as f:
                 temp = f"{float(f.read())/1000:.1f}°C"
+            return ip, cpu, mem, temp
         except Exception:
-            ip, cpu, mem, temp = "Unknown", "0", "0", "N/A"
-
-        body = (
-            f"🚀 **设备已上线** ({VERSION})\n"
-            f"🌐 **内网IP**: {ip}\n"
-            f"🌡️ **系统温度**: {temp}\n"
-            f"📊 **CPU占用**: {cpu}%\n"
-            f"💾 **内存占用**: {mem}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
-        # ✅ 修改点1：网页端触发的测试推送改为同步执行 (async_mode=False)
-        PushService.send(conf, "⚙️ 系统启动通知", body, async_mode=False)
+            return "Unknown", "0", "0", "N/A"
 
     def run(self):
-        self.push_boot_info()
+        # 守护进程启动通知：异步
+        conf = ConfigManager.get_config()
+        if conf.get("boot_push_enabled", True):
+            ip, cpu, mem, temp = self.get_sys_info()
+            body = (
+                f"🚀 **设备已上线** ({VERSION})\n"
+                f"🌐 **内网IP**: {ip}\n"
+                f"🌡️ **系统温度**: {temp}\n"
+                f"📊 **CPU占用**: {cpu}%\n"
+                f"💾 **内存占用**: {mem}\n"
+                f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            PushService.send(conf, "⚙️ 系统启动通知", body, async_mode=True)
 
         while True:
             try:
                 self._run_inner()
             except Exception as e:
-                log("ERROR", f"Fatal loop error, restarting in 5s: {e}")
+                log("ERROR", f"Fatal loop error: {e}")
                 time.sleep(5)
 
     def _run_inner(self):
@@ -326,11 +322,7 @@ class MMDVMMonitor:
         ber = m.group("ber") or "0.0"
         info = self.ham.get_info(call)
 
-        try:
-            with open("/sys/class/thermal/thermal_zone0/temp") as f:
-                current_temp = f"{float(f.read())/1000:.1f}°C"
-        except Exception:
-            current_temp = "N/A"
+        _, _, _, temp = self.get_sys_info()
 
         body = (
             f"👤 **呼号**: {call}{info['name']}\n"
@@ -341,18 +333,38 @@ class MMDVMMonitor:
             f"⏳ **时长**: {dur:.1f}秒\n"
             f"📦 **丢失**: {loss}%\n"
             f"📉 **误码**: {ber}%\n"
-            f"🌡️ **温度**: {current_temp}"
+            f"🌡️ **温度**: {temp}"
         )
 
-        # ✅ 修改点2：通联推送显式设定为异步推送 (async_mode=True)
         PushService.send(conf, "🎙️ 语音通联", body, async_mode=True)
 
 # =========================
 # Entry
 # =========================
 if __name__ == "__main__":
+    # --- 版本读取逻辑 ---
     if len(sys.argv) > 1 and sys.argv[1] == "--version":
         print(VERSION)
         sys.exit(0)
 
-    MMDVMMonitor().run()
+    monitor = MMDVMMonitor()
+    
+    # --- 网页端测试逻辑 (等效 3.0.15) ---
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        conf = ConfigManager.get_config()
+        ip, cpu, mem, temp = monitor.get_sys_info()
+        test_body = (
+            f"通道测试成功 ({VERSION})\n"
+            f"🌐 **IP**: {ip}\n"
+            f"🌡️ **温度**: {temp}\n"
+            f"📊 **CPU**: {cpu}%\n"
+            f"💾 **内存**: {mem}\n"
+            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}"
+        )
+        # 强制同步推送，以便 PHP 接收退出信号
+        PushService.send(conf, "🔔 测试推送", test_body, async_mode=False)
+        print("Success")
+        sys.exit(0)
+    
+    # --- 守护进程启动 ---
+    monitor.run()
