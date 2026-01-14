@@ -1,39 +1,47 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 一键更新部署脚本 (v3.0.11)
+# MMDVM-Push-Notifier 一键更新脚本 (v3.0.12)
+# 开发者: BA4SMQ
 
-echo "--- 开始更新 MMDVM-Push-Notifier ---"
+echo "--- 开始执行一键更新流程 ---"
 
-# 1. 切换到读写模式
+# 1. 切换至读写模式，确保可以修改系统文件
 sudo rpi-rw
 
-# 2. 从 GitHub 拉取最新代码
-echo "正在从 GitHub 获取最新版本..."
-git fetch --all
-git reset --hard origin/main
+# 2. 进入项目目录
+INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+cd $INSTALL_DIR || { echo "错误: 找不到项目目录 $INSTALL_DIR"; exit 1; }
 
-# 3. 设置配置文件权限 (修复无法保存的问题)
-if [ -f "/etc/mmdvm_push.json" ]; then
-    echo "正在修复配置文件权限..."
-    sudo chmod 666 /etc/mmdvm_push.json
+# 3. 从 GitHub 强制同步最新代码
+echo "正在拉取远程仓库代码..."
+# 放弃所有本地未提交的修改，强制对齐远程仓库
+sudo git fetch --all
+sudo git reset --hard origin/main
+
+# 4. 修复关键配置文件权限
+# 这是解决网页端“无法保存黑白名单”的核心步骤
+CONFIG_FILE="/etc/mmdvm_push.json"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "正在加固配置文件权限 (666)..."
+    sudo chown www-data:www-data $CONFIG_FILE
+    sudo chmod 666 $CONFIG_FILE
 fi
 
-# 4. 部署 PHP 管理页面到 Web 目录
-echo "正在部署 PHP 管理页面..."
-# 自动定位 Pi-Star 的管理员目录
+# 5. 自动同步 PHP 管理页面
+# 由于 install.sh 已经建立了软链接，此处的 git pull 会自动让网页端生效
+# 但为了保险起见，我们再次检查并确保软链接指向正确
 WEB_ADMIN_DIR="/var/www/dashboard/admin"
 if [ -d "$WEB_ADMIN_DIR" ]; then
-    sudo cp /home/pi-star/MMDVM-Push-Notifier/push_admin.php "$WEB_ADMIN_DIR/"
-    sudo chmod 644 "$WEB_ADMIN_DIR/push_admin.php"
-    echo "PHP 页面已部署至 $WEB_ADMIN_DIR/push_admin.php"
-else
-    echo "错误: 未找到 Web 管理目录，请手动检查路径。"
+    sudo ln -sf $INSTALL_DIR/push_admin.php $WEB_ADMIN_DIR/push_admin.php
+    echo "网页管理页面已同步。"
 fi
 
-# 5. 重启 Systemd 服务
-echo "正在重启推送服务..."
+# 6. 重启服务以加载新版本核心逻辑
+echo "正在重启 MMDVM 推送服务..."
 sudo systemctl daemon-reload
 sudo systemctl restart mmdvm_push.service
 
-# 6. 检查服务状态
+# 7. 检查更新后的状态
 echo "--- 更新完成 ---"
+CURRENT_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null || echo "v3.0.12")
+echo "当前版本: $CURRENT_VER"
 sudo systemctl status mmdvm_push.service --no-pager
