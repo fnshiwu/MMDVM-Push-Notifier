@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-"""
-MMDVM Push Monitor
-Designed as a long-running daemon-grade service.
-"""
-
 import os
 import time
 import json
 import glob
 import re
 import sys
-import base64
-import hmac
-import hashlib
 import mmap
 import subprocess
 import atexit
@@ -29,19 +21,14 @@ from threading import Semaphore
 # Global Constants
 # =========================
 VERSION = "v3.1.2-S"
-
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
-
 LOG_POLL_INTERVAL = 0.1
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
 CONFIG_RELOAD_INTERVAL = 5
 
-# =========================
-# Logging
-# =========================
 def log(level, msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] [{level}] {msg}", flush=True)
@@ -60,10 +47,7 @@ class ConfigManager:
         if now - cls._last_check < CONFIG_RELOAD_INTERVAL:
             return cls._config
         cls._last_check = now
-
-        if not os.path.exists(CONFIG_FILE):
-            return cls._config
-
+        if not os.path.exists(CONFIG_FILE): return cls._config
         try:
             mtime = os.path.getmtime(CONFIG_FILE)
             if mtime > cls._last_mtime:
@@ -71,22 +55,19 @@ class ConfigManager:
                     cls._config = json.load(f)
                 cls._last_mtime = mtime
                 log("INFO", "Config reloaded")
-        except json.JSONDecodeError as e:
-            log("ERROR", f"Invalid config JSON, keep last config: {e}")
         except Exception as e:
             log("WARN", f"Config reload failed: {e}")
-
         return cls._config
 
 # =========================
-# Ham Info Manager
+# Ham Info Manager (包含国家映射)
 # =========================
 class HamInfoManager:
     def __init__(self, id_file):
         self.id_file = id_file
         self._io_lock = Semaphore(2)
         self.geo_map = {
-            "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
+"China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
             "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜",
             "Thailand": "🇹🇭 泰国", "Singapore": "🇸🇬 新加坡", "Malaysia": "🇲🇾 马来西亚", "Indonesia": "🇮🇩 印度尼西亚",
             "Philippines": "🇵🇭 菲律宾", "Vietnam": "🇻🇳 越南", "India": "🇮🇳 印度", "Pakistan": "🇵🇰 巴基斯坦",
@@ -117,59 +98,29 @@ class HamInfoManager:
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", "Seychelles": "🇸🇨 塞舌尔"
         }
 
-    @lru_cache(maxsize=1)
-    def _file_exists(self):
-        return os.path.exists(self.id_file)
-
     @lru_cache(maxsize=4096)
     def get_info(self, callsign):
-        if not self._file_exists():
-            return {"name": "", "loc": "Unknown"}
-
-        if not self._io_lock.acquire(timeout=2):
-            return {"name": "", "loc": "Unknown"}
-
+        if not os.path.exists(self.id_file): return {"name": "", "loc": "Unknown"}
         try:
             with open(self.id_file, "rb") as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                     key = f",{callsign},".encode()
                     idx = mm.find(key)
-                    if idx == -1:
-                        return {"name": "", "loc": "Unknown"}
-
+                    if idx == -1: return {"name": "", "loc": "Unknown"}
                     start = mm.rfind(b"\n", 0, idx) + 1
-                    end = mm.find(b"\n", idx)
-                    line = mm[start:end].decode("utf-8", "ignore")
+                    line = mm[start:mm.find(b"\n", idx)].decode("utf-8", "ignore")
                     parts = line.split(",")
-
-                    first = parts[2].strip() if len(parts) > 2 else ""
-                    last = parts[3].strip() if len(parts) > 3 else ""
-                    city = parts[4].strip().title() if len(parts) > 4 else ""
-                    state = parts[5].strip().upper() if len(parts) > 5 else ""
-                    country = parts[6].strip() if len(parts) > 6 else "Unknown"
-
-                    if any('\u4e00' <= char <= '\u9fff' for char in country):
-                        for k, v in self.geo_map.items():
-                            if k in country or (len(v.split()) > 1 and v.split()[1] in country):
-                                country = v
-                                break
-                    else:
-                        country = self.geo_map.get(country, country)
-
+                    first, last = parts[2].strip() if len(parts)>2 else "", parts[3].strip() if len(parts)>3 else ""
+                    city, state = parts[4].strip().title() if len(parts)>4 else "", parts[5].strip().upper() if len(parts)>5 else ""
+                    country = parts[6].strip() if len(parts)>6 else "Unknown"
+                    country = self.geo_map.get(country, country)
                     name = f"{first} {last}".strip().upper()
                     loc = f"{city}, {state} ({country})" if city or state else country
-
-                    return {
-                        "name": f" ({name})" if name else "",
-                        "loc": loc
-                    }
-        except Exception:
-            return {"name": "", "loc": "Unknown"}
-        finally:
-            self._io_lock.release()
+                    return {"name": f" ({name})" if name else "", "loc": loc}
+        except: return {"name": "", "loc": "Unknown"}
 
 # =========================
-# Push Service
+# Push Service (TG, 飞书, 微信)
 # =========================
 class PushService:
     _executor = ThreadPoolExecutor(max_workers=PUSH_MAX_WORKERS)
@@ -178,49 +129,40 @@ class PushService:
     @classmethod
     def send(cls, conf, title, body, async_mode=True):
         if async_mode:
-            if not cls._semaphore.acquire(blocking=False):
-                log("WARN", "Push queue full, dropping message")
-                return
-            cls._executor.submit(cls._wrapped_send, conf, title, body)
+            if cls._semaphore.acquire(blocking=False):
+                cls._executor.submit(cls._wrapped_send, conf, title, body)
         else:
             cls._do_send(conf, title, body)
 
     @classmethod
     def _wrapped_send(cls, *args):
-        try:
-            cls._do_send(*args)
-        finally:
-            cls._semaphore.release()
+        try: cls._do_send(*args)
+        finally: cls._semaphore.release()
 
     @classmethod
     def _do_send(cls, conf, title, body):
+        # 1. Telegram
         if conf.get("push_tg_enabled") and conf.get("tg_token"):
-            text = f"<b>{title}</b>\n\n{body}"
-            url = f"https://api.telegram.org/bot{conf['tg_token']}/sendMessage"
-            data = urllib.parse.urlencode({
-                "chat_id": conf.get("tg_chat_id"),
-                "text": text,
-                "parse_mode": "HTML"
-            }).encode()
-            cls._post(url, data)
+            cls._post(f"https://api.telegram.org/bot{conf['tg_token']}/sendMessage", 
+                     urllib.parse.urlencode({"chat_id": conf.get("tg_chat_id"), "text": f"<b>{title}</b>\n\n{body}", "parse_mode": "HTML"}).encode())
+        
+        # 2. 飞书 (Lark)
+        if conf.get("push_lark_enabled") and conf.get("lark_url"):
+            card = {"msg_type": "text", "content": {"text": f"{title}\n{body}"}}
+            cls._post(conf["lark_url"], json.dumps(card).encode(), is_json=True)
+
+        # 3. 微信 (Server酱/PushPlus)
+        if conf.get("push_wechat_enabled") and conf.get("wechat_url"):
+            cls._post(conf["wechat_url"], urllib.parse.urlencode({"title": title, "desp": body, "content": body}).encode())
 
     @staticmethod
-    def _post(url, data):
+    def _post(url, data, is_json=False):
         for i in range(PUSH_RETRY + 1):
             try:
-                req = urllib.request.Request(url, data=data)
-                with urllib.request.urlopen(req, timeout=10):
-                    return
-            except Exception:
-                if i == PUSH_RETRY:
-                    log("WARN", "Push failed")
-                time.sleep(1)
-
-    @classmethod
-    def shutdown(cls):
-        cls._executor.shutdown(wait=True)
-
-atexit.register(PushService.shutdown)
+                headers = {'Content-Type': 'application/json'} if is_json else {}
+                req = urllib.request.Request(url, data=data, headers=headers)
+                with urllib.request.urlopen(req, timeout=10): return
+            except Exception: time.sleep(1)
 
 # =========================
 # Monitor
@@ -229,142 +171,56 @@ class MMDVMMonitor:
     def __init__(self):
         self.ham = HamInfoManager(LOCAL_ID_FILE)
         self.last_msg = {"call": "", "ts": 0}
-        self.last_log_inode = None
-
-        self.re_end = re.compile(
-            r"end of (?P<v_type>(?:voice\s+|data\s+)?)transmission from "
-            r"(?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), "
-            r"(?P<dur>\d+\.?\d*) seconds"
-            r"(?:, (?P<loss>\d+)% packet loss)?"
-            r"(?:, BER: (?P<ber>\d+\.?\d*)%)?",
-            re.IGNORECASE
-        )
+        self.re_end = re.compile(r"end of .*transmission from (?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), (?P<dur>\d+\.?\d*) seconds", re.IGNORECASE)
 
     def get_sys_info(self):
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
             cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'")
             mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'")
-            with open("/sys/class/thermal/thermal_zone0/temp") as f:
-                temp = f"{float(f.read())/1000:.1f}°C"
+            with open("/sys/class/thermal/thermal_zone0/temp") as f: temp = f"{float(f.read())/1000:.1f}°C"
             return ip, cpu, mem, temp
-        except Exception:
-            return "Unknown", "0", "0", "N/A"
+        except: return "Unknown", "0", "0", "N/A"
 
     def run(self):
-        # 守护进程启动通知：异步
         conf = ConfigManager.get_config()
         if conf.get("boot_push_enabled", True):
             ip, cpu, mem, temp = self.get_sys_info()
-            body = (
-                f"🚀 **设备已上线** ({VERSION})\n"
-                f"🌐 **内网IP**: {ip}\n"
-                f"🌡️ **系统温度**: {temp}\n"
-                f"📊 **CPU占用**: {cpu}%\n"
-                f"💾 **内存占用**: {mem}\n"
-                f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            PushService.send(conf, "⚙️ 系统启动通知", body, async_mode=True)
-
-        while True:
-            try:
-                self._run_inner()
-            except Exception as e:
-                log("ERROR", f"Fatal loop error: {e}")
-                time.sleep(5)
-
-    def _run_inner(self):
-        log("INFO", f"MMDVM Push {VERSION} started")
-        while True:
-            log_file = self._latest_log()
-            if not log_file:
-                time.sleep(2)
-                continue
-
-            inode = os.stat(log_file).st_ino
-            if inode != self.last_log_inode:
-                self.last_log_inode = inode
-
-            with open(log_file, "r", errors="ignore") as f:
-                f.seek(0, 2)
-                while True:
-                    line = f.readline()
-                    if not line:
-                        time.sleep(LOG_POLL_INTERVAL)
-                        break
-                    self.process_line(line)
-
-    def _latest_log(self):
-        files = glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
-        return max(files, key=os.path.getmtime) if files else None
-
-    def process_line(self, line):
-        if "end of" not in line.lower():
-            return
-
-        m = self.re_end.search(line)
-        if not m:
-            return
-
-        conf = ConfigManager.get_config()
-        call = m.group("call").upper()
-        dur = float(m.group("dur"))
-
-        if dur < conf.get("min_duration", 1):
-            return
-
-        now = time.time()
-        if call == self.last_msg["call"] and now - self.last_msg["ts"] < 3:
-            return
-        self.last_msg = {"call": call, "ts": now}
-
-        loss = m.group("loss") or "0"
-        ber = m.group("ber") or "0.0"
-        info = self.ham.get_info(call)
-
-        _, _, _, temp = self.get_sys_info()
-
-        body = (
-            f"👤 **呼号**: {call}{info['name']}\n"
-            f"👥 **群组**: {m.group('target').strip()}\n"
-            f"📍 **地区**: {info['loc']}\n"
-            f"📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"⏳ **时长**: {dur:.1f}秒\n"
-            f"📦 **丢失**: {loss}%\n"
-            f"📉 **误码**: {ber}%\n"
-            f"🌡️ **温度**: {temp}"
-        )
-
-        PushService.send(conf, "🎙️ 语音通联", body, async_mode=True)
+            PushService.send(conf, "⚙️ 系统启动通知", f"🚀 设备上线: {VERSION}\n🌐 IP: {ip}\n🌡️ 温度: {temp}\n📊 CPU: {cpu}%\n💾 内存: {mem}", async_mode=True)
+        
+        log_file = max(glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log")), key=os.path.getmtime)
+        with open(log_file, "r", errors="ignore") as f:
+            f.seek(0, 2)
+            while True:
+                line = f.readline()
+                if not line: time.sleep(LOG_POLL_INTERVAL); continue
+                if "end of" in line.lower():
+                    m = self.re_end.search(line)
+                    if not m: continue
+                    conf = ConfigManager.get_config()
+                    call, dur = m.group("call").upper(), float(m.group("dur"))
+                    if dur < conf.get("min_duration", 1): continue
+                    now = time.time()
+                    if call == self.last_msg["call"] and now - self.last_msg["ts"] < 3: continue
+                    self.last_msg = {"call": call, "ts": now}
+                    info = self.ham.get_info(call)
+                    _, _, _, temp = self.get_sys_info()
+                    body = f"👤 呼号: {call}{info['name']}\n👥 群组: {m.group('target').strip()}\n📍 地区: {info['loc']}\n⏳ 时长: {dur:.1f}秒\n🌡️ 温度: {temp}"
+                    PushService.send(conf, "🎙️ 语音通联", body, async_mode=True)
 
 # =========================
 # Entry
 # =========================
 if __name__ == "__main__":
-    # --- 版本读取逻辑 ---
     if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        print(VERSION)
-        sys.exit(0)
-
-    monitor = MMDVMMonitor()
+        print(VERSION); sys.exit(0)
     
-    # --- 网页端测试逻辑 (等效 3.0.15) ---
+    monitor = MMDVMMonitor()
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
         conf = ConfigManager.get_config()
         ip, cpu, mem, temp = monitor.get_sys_info()
-        test_body = (
-            f"通道测试成功 ({VERSION})\n"
-            f"🌐 **IP**: {ip}\n"
-            f"🌡️ **温度**: {temp}\n"
-            f"📊 **CPU**: {cpu}%\n"
-            f"💾 **内存**: {mem}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}"
-        )
-        # 强制同步推送，以便 PHP 接收退出信号
+        test_body = f"通道测试成功 ({VERSION})\n🌐 IP: {ip}\n🌡️ 温度: {temp}\n📊 CPU: {cpu}%\n💾 内存: {mem}"
         PushService.send(conf, "🔔 测试推送", test_body, async_mode=False)
-        print("Success")
-        sys.exit(0)
-    
-    # --- 守护进程启动 ---
+        print("Success"); sys.exit(0)
+
     monitor.run()
