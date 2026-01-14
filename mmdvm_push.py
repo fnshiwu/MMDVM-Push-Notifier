@@ -28,7 +28,7 @@ from threading import Semaphore
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.2"
+VERSION = "v3.1.2-S"
 
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
@@ -85,7 +85,6 @@ class HamInfoManager:
     def __init__(self, id_file):
         self.id_file = id_file
         self._io_lock = Semaphore(2)
-        # ✅ 已加回国家映射表
         self.geo_map = {
             "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", "Taiwan": "🇹🇼 中国台湾",
             "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜",
@@ -149,7 +148,6 @@ class HamInfoManager:
                     state = parts[5].strip().upper() if len(parts) > 5 else ""
                     country = parts[6].strip() if len(parts) > 6 else "Unknown"
 
-                    # ✅ 应用国家映射表逻辑
                     if any('\u4e00' <= char <= '\u9fff' for char in country):
                         for k, v in self.geo_map.items():
                             if k in country or (len(v.split()) > 1 and v.split()[1] in country):
@@ -242,6 +240,7 @@ class MMDVMMonitor:
             re.IGNORECASE
         )
 
+    # -------- 启动推送：网页端测试属于此范畴，改为实时同步推送 --------
     def push_boot_info(self):
         conf = ConfigManager.get_config()
         if not conf.get("boot_push_enabled", True):
@@ -265,7 +264,8 @@ class MMDVMMonitor:
             f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-        PushService.send(conf, "⚙️ 系统启动通知", body, async_mode=True)
+        # ✅ 修改点1：网页端触发的测试推送改为同步执行 (async_mode=False)
+        PushService.send(conf, "⚙️ 系统启动通知", body, async_mode=False)
 
     def run(self):
         self.push_boot_info()
@@ -344,6 +344,7 @@ class MMDVMMonitor:
             f"🌡️ **温度**: {current_temp}"
         )
 
+        # ✅ 修改点2：通联推送显式设定为异步推送 (async_mode=True)
         PushService.send(conf, "🎙️ 语音通联", body, async_mode=True)
 
 # =========================
