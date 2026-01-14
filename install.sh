@@ -87,5 +87,5 @@ sudo systemctl restart mmdvm_push.service
 
 echo "-----------------------------------------------"
 echo "安装完成！"
-echo "配合度自检：系统服务、资源限制、网页更新权限均已就绪。"
+echo "管理面板地址: http://$(hostname -I | awk '{print $1}')/admin/push_admin.php"
 echo "-----------------------------------------------"
