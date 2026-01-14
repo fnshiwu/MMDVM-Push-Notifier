@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 增强型安装脚本 (v3.0.10 启动强化版)
+# MMDVM-Push-Notifier 完整功能安装脚本 (v3.0.12)
 # 开发者: BA4SMQ
 
 # 确保以 root 权限运行
@@ -13,48 +13,48 @@ rpi-rw
 
 echo "1. 正在创建并设置目录权限..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
-# 如果目录不存在则创建
 mkdir -p $INSTALL_DIR
 
-# 核心修复：必须允许 Web 用户 (www-data) 访问此目录，否则 PHP 会报 404 或权限错误
+# 确保 pi-star 拥有目录，同时 www-data 组有访问权
 chown -R pi-star:pi-star $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
-# 给 www-data 组读取权限，解决 PHP 访问问题
 usermod -a -G pi-star www-data
 
-echo "2. 正在初始化配置文件..."
+echo "2. 正在初始化配置文件并修复权限..."
 CONFIG_FILE="/etc/mmdvm_push.json"
 if [ ! -f "$CONFIG_FILE" ]; then
-    echo '{"my_callsign":"NOCALL","min_duration":1.0,"ui_lang":"cn","ignore_list":[],"focus_list":[]}' | tee $CONFIG_FILE > /dev/null
+    # 显式初始化，增加 ui_lang 字段防止报错
+    echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn","ignore_list":"","focus_list":""}' | sudo tee $CONFIG_FILE > /dev/null
 fi
-# 设置权限，允许 PHP (www-data) 读写配置文件
-chown www-data:www-data $CONFIG_FILE
-chmod 664 $CONFIG_FILE
+# 【重要修改】：设置 666 权限，确保网页端 php (www-data) 能够实时保存修改
+sudo chown www-data:www-data $CONFIG_FILE
+sudo chmod 666 $CONFIG_FILE
 
-echo "3. 部署 Web 管理页面"
-# Pi-Star 标准后台路径
+echo "3. 部署 Web 管理页面 (软链接模式)..."
 WEB_DIR="/var/www/dashboard/admin"
-
 if [ -d "$WEB_DIR" ]; then
-    # 强制创建软链接
-    ln -sf $INSTALL_DIR/push_admin.php $WEB_DIR/push_admin.php
-    # 额外在根目录建立链接，防止部分版本 Dashboard 路径偏移
-    ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
-    
-    # 确保 PHP 能够执行该脚本（用于测试和重启服务）
-    chown www-data:www-data $INSTALL_DIR/push_admin.php
+    # 使用软链接，这样 git pull 更新后网页自动生效，无需重复拷贝
+    sudo ln -sf $INSTALL_DIR/push_admin.php $WEB_DIR/push_admin.php
+    sudo ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
+    sudo chown www-data:www-data $INSTALL_DIR/push_admin.php
     echo "Web 页面已部署至: $WEB_DIR/push_admin.php"
 else
-    echo "警告: 找不到 Web 目录 $WEB_DIR，请检查您的 Pi-Star 版本。"
+    echo "警告: 找不到 Web 目录 $WEB_DIR"
 fi
 
-echo "4. 配置系统服务 (系统占用优化版)..."
-SERVICE_FILE="/etc/systemd/system/mmdvm_push.service"
+echo "4. 授权网页端一键更新 (Sudoers)..."
+# 允许网页端的 PHP 进程免密执行 update.sh，这是“网页更新”按钮生效的核心
+UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
+chmod +x $UPDATE_SCRIPT
+if ! sudo grep -q "$UPDATE_SCRIPT" /etc/sudoers; then
+    echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT" | sudo tee -a /etc/sudoers > /dev/null
+fi
 
-# 现场生成 service 文件，整合严格的资源限制
+echo "5. 配置系统服务 (保留资源限制策略)..."
+SERVICE_FILE="/etc/systemd/system/mmdvm_push.service"
 cat <<EOF > $SERVICE_FILE
 [Unit]
-Description=MMDVM Log Push Notifier (v3.0.10)
+Description=MMDVM Log Push Notifier (v3.0.12)
 After=network-online.target
 Wants=network-online.target
 
@@ -64,11 +64,12 @@ User=root
 Group=root
 WorkingDirectory=$INSTALL_DIR
 ExecStartPre=/bin/sleep 10
-ExecStart=/usr/bin/python3 $INSTALL_DIR/mmdvm_push.py
+# 使用 -u 模式确保 Python 日志实时输出
+ExecStart=/usr/bin/python3 -u $INSTALL_DIR/mmdvm_push.py
 Restart=always
 RestartSec=5
 
-# 资源限制策略
+# 严格的资源限制，确保树莓派稳定
 NoNewPrivileges=true
 LimitNOFILE=1024
 CPUQuota=30%
@@ -79,12 +80,12 @@ TasksMax=50
 WantedBy=multi-user.target
 EOF
 
-echo "5. 正在启动服务..."
-systemctl daemon-reload
-systemctl enable mmdvm_push.service
-systemctl restart mmdvm_push.service
+echo "6. 正在启动服务..."
+sudo systemctl daemon-reload
+sudo systemctl enable mmdvm_push.service
+sudo systemctl restart mmdvm_push.service
 
 echo "-----------------------------------------------"
 echo "安装完成！"
-echo "管理面板地址: http://$(hostname -I | awk '{print $1}')/admin/push_admin.php"
+echo "配合度自检：系统服务、资源限制、网页更新权限均已就绪。"
 echo "-----------------------------------------------"
