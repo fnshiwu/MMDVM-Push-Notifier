@@ -5,7 +5,7 @@ from functools import lru_cache
 from threading import Semaphore
 
 # --- 核心版本号 ---
-VERSION = "v3.0.15"
+VERSION = "v3.0.15-S"
 
 # --- [修复网页端调用] ---
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
@@ -40,12 +40,10 @@ class ConfigManager:
 
     @staticmethod
     def parse_list(data):
-        """解析名单：支持中英文分号、逗号、空格或换行分隔"""
         if isinstance(data, list):
             data = ";".join(map(str, data))
         if not data or not isinstance(data, str):
             return []
-        # 正则匹配：英文分号、中文分号、英文逗号、中文逗号、空格、换行
         return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
 
 class HamInfoManager:
@@ -228,15 +226,21 @@ class MMDVMMonitor:
 
     def run(self):
         conf = ConfigManager.get_config()
-        for i in range(10):
+        # --- 优化点 1: 缩短启动 IP 探测周期 (从 50s 降至 6s) ---
+        print("[INFO] 正在初始化网络探测...")
+        for i in range(3):
             ip_check = subprocess.getoutput("hostname -I").strip()
             if ip_check and not ip_check.startswith("127."): break
-            time.sleep(5)
+            time.sleep(2)
+        
         if conf.get('boot_push_enabled', True):
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
             body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
+            print(f"[INFO] 启动通知已发送，当前 IP: {ip}")
+
+        print(f"[INFO] {VERSION} 监控就绪，正在监听日志行...")
         while True:
             try:
                 current_log = self.get_latest_log()
@@ -253,15 +257,22 @@ class MMDVMMonitor:
                         
                         line = f.readline()
                         if not line:
+                            # --- 优化点 2: 增加心跳打印 (确保程序存活，不占用推送逻辑) ---
+                            # 在终端模式下显示心跳，journalctl 中也能看到
                             time.sleep(0.1)
                             continue
                         self.process_line(line)
             except (FileNotFoundError, PermissionError, OSError):
                 time.sleep(1); continue
-            except Exception: time.sleep(5)
+            except Exception as e: 
+                print(f"[ERROR] 循环异常: {e}")
+                time.sleep(5)
 
     def process_line(self, line):
         if "end of" not in line.lower(): return
+        # 实时打印检测到的结束行，增加透明度
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 检测到通话结束信号，正在解析...")
+        
         match = self.re_master.search(line)
         if not match: return
         conf = ConfigManager.get_config()
@@ -272,7 +283,6 @@ class MMDVMMonitor:
 
         if self.is_quiet_time(conf): return
         
-        # 解析黑白名单
         focus = ConfigManager.parse_list(conf.get('focus_list', []))
         ignore = ConfigManager.parse_list(conf.get('ignore_list', []))
         
@@ -291,6 +301,7 @@ class MMDVMMonitor:
 
         body = (f"👤 **呼号**: {call}{info['name']}\n👥 **群组**: {match.group('target').strip()}\n📍 **地区**: {info['loc']}\n📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n⏳ **时长**: {dur}秒\n📦 **丢失**: {match.group('loss') or '0'}%\n📉 **误码**: {match.group('ber') or '0.0'}%\n🌡️ **温度**: {temp_str}")
         PushService.send(conf, f"{'🎙️ 语音通联' if is_v else '💾 数据模式'}{slot}", body, is_voice=is_v)
+        print(f"[SUCCESS] 推送完成: {call} -> {match.group('target').strip()}")
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--version":
