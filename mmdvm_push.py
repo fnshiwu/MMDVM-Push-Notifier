@@ -56,7 +56,7 @@ class ConfigManager:
         return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
 
 # =========================
-# Ham Info Manager (包含完整国家映射表)
+# Ham Info Manager (包含完整映射表)
 # =========================
 class HamInfoManager:
     def __init__(self, id_file):
@@ -129,7 +129,7 @@ class HamInfoManager:
         return {"name": "", "loc": "Unknown"}
 
 # =========================
-# Push Service (替换为 v3.0.18 的三通道逻辑)
+# Push Service
 # =========================
 class PushService:
     _max_workers = 3
@@ -220,11 +220,9 @@ class MMDVMMonitor:
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read()) / 1000.0
-            unit = conf.get('temp_unit', 'C')
-            if unit == 'F':
-                val = (temp_c * 9/5) + 32
-                return f"{val:.1f}°F", val
-            return f"{temp_c:.1f}°C", temp_c
+            unit = conf.get('temp_unit', 'C').upper()
+            val = (temp_c * 9/5) + 32 if unit == 'F' else temp_c
+            return f"{val:.1f}°{unit}", val
         except: return "N/A", 0.0
 
     def check_temp_alert(self, conf):
@@ -238,7 +236,7 @@ class MMDVMMonitor:
             interval_sec = int(conf.get('temp_interval', 30)) * 60
             if now - self.last_temp_alert_time > interval_sec:
                 self.last_temp_alert_time = now
-                alert_body = (f"🚨 **硬件高温预警**\n🔥 **当前温度**: {display_str}\n⚠️ **预警阈值**: {threshold:.1f}{conf.get('temp_unit','C')}\n⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
+                alert_body = (f"🚨 **硬件高温预警**\n🔥 **当前温度**: {display_str}\n⚠️ **预警阈值**: {threshold:.1f}°{conf.get('temp_unit','C')}\n⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}")
                 PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
 
     def get_latest_log(self):
@@ -288,7 +286,6 @@ class MMDVMMonitor:
 
     def process_line(self, line):
         if "end of" not in line.lower(): return
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 检测到通话结束信号，正在解析...")
         
         match = self.re_master.search(line)
         if not match: return
@@ -335,7 +332,6 @@ if __name__ == "__main__":
         ip, cpu, mem = monitor.get_sys_info()
         temp_str, _ = monitor.get_current_temp(conf)
         test_body = (f"通道测试成功 ({VERSION})\n🌐 **IP**: {ip}\n🌡️ **温度**: {temp_str}\n📊 **CPU**: {cpu}%\n💾 **内存**: {mem}\n⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}")
-        # 同步模式执行测试推送
         PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
         print("Success")
     else:
