@@ -1,97 +1,113 @@
 # MMDVM-Push-Notifier
 
-> 一个为 **Pi-Star / MMDVM** 设计的高性能通联与系统状态推送通知工具
-> 作者：BA4SMQ
+> **中文 | English**
+> A high-performance notification system for **Pi-Star / MMDVM**
 
 ---
 
-## 📌 项目简介
+## 📌 项目简介 | Project Overview
 
-**MMDVM-Push-Notifier** 是一个专为 **Pi-Star 数字语音热点** 设计的实时推送通知系统。
+**MMDVM-Push-Notifier** 是一个专为 **Pi-Star 数字语音热点** 设计的实时推送通知工具。
 
-它通过解析 `MMDVMHost` 运行日志，自动识别 **语音 / 数据通联事件**，并将结构化信息推送至：
+它通过解析 `MMDVMHost` 运行日志，自动识别 **语音 / 数据通联事件**，并将结构化信息推送至多个平台。
+
+**MMDVM-Push-Notifier** is a real-time notification system designed specifically for **Pi-Star based MMDVM hotspots**.
+It monitors `MMDVMHost` logs and sends structured notifications for **voice and data transmissions**.
+
+支持 / Supported platforms:
 
 * 📢 Telegram
-* 📢 微信（PushPlus）
-* 📢 飞书（Webhook 机器人）
-
-同时支持 **网页端配置管理**、**黑白名单过滤**、**免打扰时段**、**硬件温度告警** 以及 **系统上线通知**。
-
-本项目并非简单脚本，而是一个：
-
-* 长时间运行稳定
-* 面向 Pi-Star 环境深度适配
-* 支持在线更新与持续维护
-
-的完整通知子系统。
+* 📢 WeChat (PushPlus)
+* 📢 Feishu (Lark Webhook)
 
 ---
 
-## ✨ 功能特性
+## ✨ 功能特性 | Features
 
-### 🔔 通联推送
+### 🔔 通联推送 | QSO Notifications
 
-* 自动识别 **语音 / 数据** 通联
-* 解析呼号、群组、时长、误码率、丢包率
-* 自动区分 **Slot 1 / Slot 2**（DMR）
-* 支持最短通联时长过滤
+* 语音 / 数据通联自动识别
+  Automatic detection of voice and data transmissions
+* 呼号、群组、时长、误码率、丢包率解析
+  Callsign, talkgroup, duration, BER and packet loss parsing
+* DMR Slot 1 / Slot 2 自动识别
+  Automatic Slot 1 / Slot 2 detection
+* 最短通联时长过滤
+  Minimum transmission duration filter
 
-### 🌍 呼号与地区解析
+### 🌍 呼号与地区解析 | Callsign & Location Lookup
 
-* 本地解析 `nextionUsers.csv`
-* 显示姓名（如可用）
-* 国家/地区 Emoji + 中文映射
-* 高性能 mmap + LRU Cache
+* 本地解析 `nextionUsers.csv`（无需外部 API）
+  Local lookup via `nextionUsers.csv` (no external API)
+* 姓名 + 地区显示（如可用）
+  Name and location display when available
+* 国家 Emoji + 中文名称映射
+  Country emoji with Chinese localization
+* mmap + LRU Cache，高性能低占用
+  High performance via mmap + LRU cache
 
-### 🧰 系统状态推送
+### 🧰 系统状态推送 | System Status Notifications
 
 * 系统启动上线通知
-* 当前 IP / CPU / 内存 / 温度
-* 硬件高温告警（可配置阈值与频率）
+  Boot / online notification
+* IP / CPU / 内存 / 温度信息
+  IP, CPU, memory and temperature reporting
+* 硬件高温告警（可配置）
+  Configurable high temperature alerts
 
-### 🧹 智能过滤
+### 🧹 智能过滤 | Smart Filtering
 
 * 呼号白名单（focus_list）
+  Callsign whitelist
 * 呼号黑名单（ignore_list）
+  Callsign blacklist
 * 免打扰时段（quiet mode）
+  Quiet hours / Do-Not-Disturb mode
 * 重复推送抑制
+  Duplicate notification suppression
 
-### 🌐 Web 管理界面
+### 🌐 Web 管理界面 | Web Admin Panel
 
 * Pi-Star Dashboard 原生集成
+  Native Pi-Star dashboard integration
 * 无需手动编辑 JSON
-* 即改即生效（自动热加载配置）
+  No manual JSON editing required
+* 配置热加载（即时生效）
+  Hot-reload configuration without restart
 
-### 🔄 在线更新
+### 🔄 在线更新 | Online Update
 
 * 一键更新脚本 `update.sh`
+  One-click update script
 * 保留所有用户配置
+  User configuration preserved
 * 自动修复权限并重启服务
+  Automatic permission fix and service restart
 
 ---
 
-## 🧱 系统要求
+## 🧱 系统要求 | Requirements
 
-* Pi-Star（官方或兼容版本）
-* Python 3（Pi-Star 默认已包含）
-* 已正常运行的 MMDVMHost
+* Pi-Star (official or compatible build)
+* Python 3 (included in Pi-Star)
+* Running MMDVMHost service
 
 ---
 
-## 📁 项目结构
+## 📁 项目结构 | Project Structure
 
 ```
 MMDVM-Push-Notifier/
-├── mmdvm_push.py        # 核心推送服务
-├── push_admin.php       # Web 管理页面
-├── install.sh           # 初次安装脚本
-├── update.sh            # 一键更新脚本
-├── mmdvm_push.service   # systemd 服务文件
+├── mmdvm_push.py        # Core push service
+├── push_admin.php       # Web admin panel
+├── install.sh           # Installation script
+├── update.sh            # Update script
+├── mmdvm_push.service   # systemd service
 ```
 
 ---
 
-## 🚀 安装方法（首次安装）
+## 🚀 安装方法 | Installation
 
 ```bash
 ssh pi-star@pi-star.local
@@ -102,64 +118,31 @@ cd MMDVM-Push-Notifier
 sudo bash install.sh
 ```
 
-安装完成后，服务将自动注册并启动。
-
 ---
 
-## 🌐 Web 管理界面
+## 🌐 Web 管理界面 | Web Interface
 
-在浏览器中访问：
+访问 / Access:
 
 ```
 http://pi-star.local/admin/push_admin.php
 ```
 
-（或使用 Pi-Star 的 IP 地址）
-
-可在页面中完成：
-
-* 推送平台启用/关闭
-* Token / Webhook 配置
-* 黑白名单编辑（支持多分隔符）
-* 最短通联时长
-* 温度告警与免打扰设置
-* 一键测试推送
-
-所有配置保存在：
+配置文件 / Configuration file:
 
 ```
 /etc/mmdvm_push.json
 ```
 
-> 配置文件支持 **热加载**，无需重启服务。
+配置修改后自动生效，无需重启服务。
+Configuration changes take effect automatically without restarting the service.
 
 ---
 
-## 🔔 推送平台说明
+## 🔄 在线更新 | Updating
 
-### Telegram
-
-需要：
-
-* Bot Token
-* Chat ID（个人或群组）
-
-### 微信（PushPlus）
-
-* 申请 PushPlus Token
-* 关注 PushPlus 官方公众号
-
-### 飞书
-
-* 创建群机器人
-* 配置 Webhook
-* （可选）签名密钥
-
----
-
-## 🔄 在线更新（强烈推荐）
-
-当项目发布新版本时，请 **不要重新安装**，而是使用更新脚本。
+⚠️ **请勿重复运行 install.sh**
+⚠️ **Do NOT reinstall for upgrades**
 
 ```bash
 ssh pi-star@pi-star.local
@@ -168,23 +151,9 @@ cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash update.sh
 ```
 
-### 更新脚本会自动：
-
-* 强制同步 GitHub 最新代码
-* **保留 `/etc/mmdvm_push.json` 配置**
-* 修复 Web 页面与配置文件权限
-* 重启推送服务
-* 显示当前运行版本
-
 ---
 
-## 🧪 测试推送
-
-### Web 页面
-
-点击 **SEND TEST** 按钮
-
-### 命令行
+## 🧪 测试推送 | Test Notification
 
 ```bash
 python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
@@ -192,7 +161,7 @@ python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 
 ---
 
-## 🛑 卸载方法
+## 🛑 卸载 | Uninstall
 
 ```bash
 rpi-rw
@@ -206,24 +175,18 @@ sudo systemctl daemon-reload
 
 ---
 
-## 🧠 设计说明（给高级用户）
+## 🧠 设计说明 | Design Notes
 
-* 使用 mmap + 正则解析日志，低 CPU 占用
-* ThreadPool + Semaphore 控制并发推送
-* 配置文件修改自动生效（非轮询阻塞）
-* 针对 Pi-Star 目录结构与权限模型定制
-
----
-
-## 📜 License
-
-MIT License
+* mmap + regex based log parsing
+* ThreadPool + semaphore controlled concurrency
+* Hot-reload configuration design
+* Deep integration with Pi-Star filesystem and permission model
 
 ---
 
-## 📡 作者
+## 📡 作者 | Author
 
-* 呼号：BA4SMQ
-* QTH：江苏阜宁
+* Callsign: **BA4SMQ**
+* QTH: Jiangsu Funing, China
 
-欢迎 Issue / PR / 交流改进 👋
+---
