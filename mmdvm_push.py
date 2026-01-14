@@ -266,7 +266,7 @@ class MMDVMMonitor:
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
             status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **外网状态**: {status}\n🛠️ **管理IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **连接状态**: {status}\n🛠️ **管理IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             # 同步发送，利用内部重试机制确保首条必达
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
 
