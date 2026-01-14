@@ -1,7 +1,17 @@
 # MMDVM-Push-Notifier
 
-> **中文 | English**
+> **Project Status | 项目状态**
+> Designed for long-term, unattended operation on Pi-Star systems.
+> Actively maintained and validated in real-world hotspot deployments.
+>
+> 本项目面向 Pi-Star 的长期稳定运行场景设计，
+> 已在真实热点环境中验证并持续维护，
+> 优先保证稳定性、性能与兼容性。
+
+---
+
 > A high-performance notification system for **Pi-Star / MMDVM**
+> 一个为 **Pi-Star / MMDVM** 设计的高性能通联与系统状态推送工具
 
 ---
 
