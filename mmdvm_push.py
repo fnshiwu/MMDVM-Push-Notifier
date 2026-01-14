@@ -254,7 +254,7 @@ class MMDVMMonitor:
             if ip_check and not ip_check.startswith("127."):
                 try:
                     # 尝试通过域名访问外网，验证 DNS 和公网路由
-                    urllib.request.urlopen("http://connectivitycheck.gstatic.com/generate_204", timeout=3)
+                    urllib.request.urlopen("http://www.apple.com/library/test/success.html", timeout=3)
                     network_ok = True
                     print(f"[INFO] 网络就绪 (尝试 {i+1})")
                     break
