@@ -54,7 +54,7 @@ SERVICE_FILE="/etc/systemd/system/mmdvm_push.service"
 # 现场生成 service 文件，整合严格的资源限制
 cat <<EOF > $SERVICE_FILE
 [Unit]
-Description=MMDVM Log Push Notifier (v3.0.4)
+Description=MMDVM Log Push Notifier (v3.0.9)
 After=network-online.target
 Wants=network-online.target
 
