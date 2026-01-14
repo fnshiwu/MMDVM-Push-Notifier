@@ -1,146 +1,229 @@
+# MMDVM-Push-Notifier
+
+> 一个为 **Pi-Star / MMDVM** 设计的高性能通联与系统状态推送通知工具
+> 作者：BA4SMQ
 
 ---
 
-# MMDVM-Push-Notifier (v3.0.12)兼容DMR,P25,NXDN,YSF,D-STAR通联日志
+## 📌 项目简介
 
-**Real-time Activity Notifications for Pi-Star via Telegram & WeChat** **基于 Pi-Star 的 MMDVM 通联实时推送系统 (Telegram & 微信 & 飞书)**
+**MMDVM-Push-Notifier** 是一个专为 **Pi-Star 数字语音热点** 设计的实时推送通知系统。
+
+它通过解析 `MMDVMHost` 运行日志，自动识别 **语音 / 数据通联事件**，并将结构化信息推送至：
+
+* 📢 Telegram
+* 📢 微信（PushPlus）
+* 📢 飞书（Webhook 机器人）
+
+同时支持 **网页端配置管理**、**黑白名单过滤**、**免打扰时段**、**硬件温度告警** 以及 **系统上线通知**。
+
+本项目并非简单脚本，而是一个：
+
+* 长时间运行稳定
+* 面向 Pi-Star 环境深度适配
+* 支持在线更新与持续维护
+
+的完整通知子系统。
 
 ---
 
-## 📖 Introduction / 简介
+## ✨ 功能特性
 
-**MMDVM-Push-Notifier** is a lightweight tool for Pi-Star users to receive real-time radio activity notifications. It features a built-in web management panel, allowing you to configure push services, filters, and quiet hours directly from your browser.
+### 🔔 通联推送
 
-**MMDVM-Push-Notifier** 是一款专为 Pi-Star 用户设计的轻量级通联推送工具。它集成了网页管理面板，您可以直接在浏览器中配置推送服务、过滤规则及静音时段。
+* 自动识别 **语音 / 数据** 通联
+* 解析呼号、群组、时长、误码率、丢包率
+* 自动区分 **Slot 1 / Slot 2**（DMR）
+* 支持最短通联时长过滤
 
-### ✨ Features / 功能特性
+### 🌍 呼号与地区解析
 
-* **Web Admin Panel**: Manage everything at `http://pi-star.local/admin/push_admin.php`.
-* **Dual Channels**: Supports Telegram Bot and WeChat (via PushPlus).
-* **Smart Filtering**: Filter by callsign (Blacklist/Whitelist) and minimum duration.
-* **Quiet Mode**: Schedule "Do Not Disturb" hours (supports overnight range).
-* **Pi-Star Integrated**: Native Pi-Star CSS style and bilingual support (CN/EN).
-* **网页管理面板**: 在 `http://pi-star.local/admin/push_admin.php` 轻松配置。
-* **多通道推送**: 支持 Telegram 机器人及微信 (通过 PushPlus)，飞书机器人。
-* **智能过滤**: 支持呼号黑白名单过滤，以及自定义最小通联时长过滤。
-* **静音模式**: 支持设置免打扰时段（支持跨天设置）。
-* **深度集成**: 采用 Pi-Star 原生样式，支持中英文双语切换。
-* **实时温度**: 实时温度显示。
-* **MMDVM启动**: 设备上线提示包括IP,温度，内存，CPU占用。
-* **高温预警**: 设备高温预警，提醒通风降温。
+* 本地解析 `nextionUsers.csv`
+* 显示姓名（如可用）
+* 国家/地区 Emoji + 中文映射
+* 高性能 mmap + LRU Cache
+
+### 🧰 系统状态推送
+
+* 系统启动上线通知
+* 当前 IP / CPU / 内存 / 温度
+* 硬件高温告警（可配置阈值与频率）
+
+### 🧹 智能过滤
+
+* 呼号白名单（focus_list）
+* 呼号黑名单（ignore_list）
+* 免打扰时段（quiet mode）
+* 重复推送抑制
+
+### 🌐 Web 管理界面
+
+* Pi-Star Dashboard 原生集成
+* 无需手动编辑 JSON
+* 即改即生效（自动热加载配置）
+
+### 🔄 在线更新
+
+* 一键更新脚本 `update.sh`
+* 保留所有用户配置
+* 自动修复权限并重启服务
+
 ---
 
-## 🛠️ Installation / 安装步骤
+## 🧱 系统要求
 
-### 1. Download / 下载
+* Pi-Star（官方或兼容版本）
+* Python 3（Pi-Star 默认已包含）
+* 已正常运行的 MMDVMHost
 
-Log in to your Pi-Star via SSH and run:
+---
 
-登录 Pi-Star 的 SSH 终端并执行：
+## 📁 项目结构
+
+```
+MMDVM-Push-Notifier/
+├── mmdvm_push.py        # 核心推送服务
+├── push_admin.php       # Web 管理页面
+├── install.sh           # 初次安装脚本
+├── update.sh            # 一键更新脚本
+├── mmdvm_push.service   # systemd 服务文件
+```
+
+---
+
+## 🚀 安装方法（首次安装）
 
 ```bash
+ssh pi-star@pi-star.local
 rpi-rw
 cd /home/pi-star
 git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
 cd MMDVM-Push-Notifier
-
-```
-
-### 2. Fast Install / 一键安装
-
-Run the installer script to set permissions and register the service:
-
-运行安装脚本以自动设置权限并注册服务：
-
-```bash
 sudo bash install.sh
-
 ```
+
+安装完成后，服务将自动注册并启动。
 
 ---
 
-## 🔑 Token Setup / 获取 Token
+## 🌐 Web 管理界面
+
+在浏览器中访问：
+
+```
+http://pi-star.local/admin/push_admin.php
+```
+
+（或使用 Pi-Star 的 IP 地址）
+
+可在页面中完成：
+
+* 推送平台启用/关闭
+* Token / Webhook 配置
+* 黑白名单编辑（支持多分隔符）
+* 最短通联时长
+* 温度告警与免打扰设置
+* 一键测试推送
+
+所有配置保存在：
+
+```
+/etc/mmdvm_push.json
+```
+
+> 配置文件支持 **热加载**，无需重启服务。
+
+---
+
+## 🔔 推送平台说明
 
 ### Telegram
 
-1. **Bot Token**: Message [@BotFather](https://t.me/botfather) on TG, send `/newbot`, and follow the steps to get your API Token.
-2. **Chat ID**: Message [@userinfobot](https://t.me/userinfobot) to get your numerical User ID.
-3. **设置**: 将获取的 Token 和 ID 填入管理页面。
+需要：
 
-### WeChat (PushPlus)
+* Bot Token
+* Chat ID（个人或群组）
 
-1. Visit [PushPlus Official](http://www.pushplus.plus/) and login via WeChat.
-2. Copy your **Token** from the "One-to-One Push" section.
-3. **设置**: 将 Token 填入管理页面并确保已关注 PushPlus 公众号。
+### 微信（PushPlus）
 
-### 飞书机器人
+* 申请 PushPlus Token
+* 关注 PushPlus 官方公众号
 
-1.打开群聊：在飞书电脑端，选择一个您希望接收推送消息的群组。
-2.添加机器人：点击群组右上角的“设置”（三个点或设置图标） -> 群机器人 -> 添加机器人。
-3.选择机器人类型：在弹出列表中选择 “自定义机器人”。
-4.设置机器人信息：
-    机器人名称：例如“MMDVM 监控助手”。
-    描述：可填“接收 MMDVM 语音与数据推送”。
-5.获取 Webhook 地址：点击“添加”后，系统会生成一个 Webhook 地址。
-    重要：请复制并保存该地址，它类似于 https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxxxxxx。
-6.安全设置：选择“签名校验”
-    重要：请复制并保存密钥。
-     
----
+### 飞书
 
-## 📖 Usage / 使用说明
-
-1. Open your browser: `http://pi-star.local/admin/push_admin.php`.
-2. Enter your **Callsign** and **Tokens**.
-3. Set **Min Duration** (e.g., 3.0s) to filter out short keying.
-4. Click **SAVE SETTINGS**, then click **RESTART** to apply.
-5. Use the **SEND TEST** button to verify the connection.
-6. 浏览器访问: `http://pi-star.local/admin/push_admin.php`。
-7. 输入您的 **呼号** 和 **Token**。
-8. 设置 **最小推送时长** (建议 3.0s) 以过滤误触。
-9. 点击 **SAVE SETTINGS** 保存，然后点击 **RESTART** 使其生效。
-10. 点击 **SEND TEST** 按钮验证推送是否正常。
+* 创建群机器人
+* 配置 Webhook
+* （可选）签名密钥
 
 ---
 
-## 📂 File Structure / 文件说明
+## 🔄 在线更新（强烈推荐）
 
-* `mmdvm_push.py`: The core backend script monitoring logs. (后端核心脚本)
-* `push_admin.php`: Web-based management interface. (网页管理面板)
-* `install.sh`: Automated installation & permission script. (一键安装脚本)
-* `mmdvm_push.service`: Systemd service configuration. (系统服务配置)
+当项目发布新版本时，请 **不要重新安装**，而是使用更新脚本。
 
----
-
-## 卸载步骤
-
-# 1. 切换到可读写模式
+```bash
+ssh pi-star@pi-star.local
 rpi-rw
+cd /home/pi-star/MMDVM-Push-Notifier
+sudo bash update.sh
+```
 
-# 2. 停止并禁用旧服务
+### 更新脚本会自动：
+
+* 强制同步 GitHub 最新代码
+* **保留 `/etc/mmdvm_push.json` 配置**
+* 修复 Web 页面与配置文件权限
+* 重启推送服务
+* 显示当前运行版本
+
+---
+
+## 🧪 测试推送
+
+### Web 页面
+
+点击 **SEND TEST** 按钮
+
+### 命令行
+
+```bash
+python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
+```
+
+---
+
+## 🛑 卸载方法
+
+```bash
+rpi-rw
 sudo systemctl stop mmdvm_push.service
 sudo systemctl disable mmdvm_push.service
-
-# 3. 删除服务文件
-sudo rm -f /etc/systemd/system/mmdvm_push.service
-sudo systemctl daemon-reload
-
-# 4. 删除 Web 页面链接
-sudo rm -f /var/www/dashboard/admin/push_admin.php
-
-# 5. 删除旧的项目文件夹 
 sudo rm -rf /home/pi-star/MMDVM-Push-Notifier
-
-# 6. (可选) 如果想完全重置配置，可以删除 JSON 配置文件
-# 如果想保留之前的 Token 方便测试，可以跳过这一步
-# sudo rm -f /etc/mmdvm_push.json
-
-## 🤝 Contributing & 73
-
-Contributions are welcome! If you have suggestions for new features, feel free to open an issue or pull request.
-
-欢迎提供建议或提交代码！
-
-**73! DE BA4SMQ**
+sudo rm -f /etc/mmdvm_push.json
+sudo rm -f /var/www/dashboard/admin/push_admin.php
+sudo systemctl daemon-reload
+```
 
 ---
+
+## 🧠 设计说明（给高级用户）
+
+* 使用 mmap + 正则解析日志，低 CPU 占用
+* ThreadPool + Semaphore 控制并发推送
+* 配置文件修改自动生效（非轮询阻塞）
+* 针对 Pi-Star 目录结构与权限模型定制
+
+---
+
+## 📜 License
+
+MIT License
+
+---
+
+## 📡 作者
+
+* 呼号：BA4SMQ
+* QTH：江苏阜宁
+
+欢迎 Issue / PR / 交流改进 👋
