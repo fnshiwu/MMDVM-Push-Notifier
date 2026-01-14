@@ -10,7 +10,7 @@ from threading import Semaphore
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.5-S"
+VERSION = "v3.1.5"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
