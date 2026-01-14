@@ -255,8 +255,9 @@ class MMDVMMonitor:
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
             body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False)
-            print(f"[INFO] 启动通知已发送，当前 IP: {ip}")
+            # --- 核心修改：改为同步发送 (async_mode=False) 以确保重试机制生效 ---
+            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
+            print(f"[INFO] 启动通知发送尝试完成，当前 IP: {ip}")
 
         print(f"[INFO] {VERSION} 监控就绪，正在监听日志行...")
         while True:
