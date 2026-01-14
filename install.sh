@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 增强型安装脚本 (v3.0.4 强化版)
+# MMDVM-Push-Notifier 增强型安装脚本 (v3.0.9 启动强化版)
 # 开发者: BA4SMQ
 
 # 确保以 root 权限运行
