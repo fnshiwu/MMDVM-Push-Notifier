@@ -4,28 +4,35 @@ $configFile = '/etc/mmdvm_push.json';
 $serviceName = 'mmdvm_push.service';
 $scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
 
+// --- 获取版本号 ---
 $version = trim(@shell_exec("python3 $scriptPath --version"));
-if (empty($version)) { $version = 'v3.0.10'; }
+if (empty($version)) { $version = 'v3.0.11'; }
 
 function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
 
+// 初始化配置文件
 if (!file_exists($configFile)) {
     set_disk('rw');
-    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn"], 192));
+    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn","ignore_list"=>"","focus_list"=>""], 192));
     set_disk('ro');
 }
 
 $config = json_decode(file_get_contents($configFile), true);
 
+// 处理 POST 请求
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
+    
+    // 确定当前语言环境
+    $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
+
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
         file_put_contents($configFile, json_encode($config, 192));
     } elseif ($_POST['action'] === 'save' || $_POST['action'] === 'test') {
-        // 保存时保持原始字符串，交由 Python 处理多种分隔符
-        $config = [
+        // 构建新配置：名单部分直接存为字符串，不进行数组转换
+        $newConfig = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
             "quiet_mode" => ["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
@@ -37,13 +44,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
             "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
             "push_fs_enabled" => isset($_POST['fs_en']), "fs_webhook" => trim($_POST['fs_webhook']), "fs_secret" => trim($_POST['fs_secret']),
-            "ignore_list" => trim($_POST['ignore_list']),
+            "ignore_list" => trim($_POST['ignore_list']), 
             "focus_list" => trim($_POST['focus_list']),
-            "ui_lang" => $config['ui_lang']
+            "ui_lang" => $current_ui_lang
         ];
-        file_put_contents($configFile, json_encode($config, 192));
-        if ($_POST['action'] === 'save') {
-            $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
+        
+        if (file_put_contents($configFile, json_encode($newConfig, 192)) !== false) {
+            $config = $newConfig; // 更新当前内存变量
+            if ($_POST['action'] === 'save') {
+                $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
+            }
+        } else {
+            $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：请检查磁盘读写权限" : "❌ Save Failed: Disk Error";
         }
     }
     set_disk('ro');
@@ -56,18 +68,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
         $foundSuccess = false;
         foreach ($out as $line) { if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; } }
-        if ($foundSuccess) {
-            $alertMsg = ($config['ui_lang'] == 'cn') ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success";
-        } else {
-            $errMsg = !empty($out) ? implode(" ", $out) : "Unknown Error";
-            $alertMsg = ($config['ui_lang'] == 'cn') ? "❌ 测试失败: $errMsg" : "❌ Test Failed: $errMsg";
-        }
+        $alertMsg = $foundSuccess ? 
+            ($current_ui_lang == 'cn' ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success") : 
+            ($current_ui_lang == 'cn' ? "❌ 测试失败: " . implode(" ", $out) : "❌ Test Failed");
     }
 }
 
+// 页面显示逻辑
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
 $is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
+
+// 兼容函数：处理旧版数组数据在网页上的显示
+function format_list_for_web($data) {
+    if (is_array($data)) return implode("; ", $data);
+    return (string)$data;
+}
 
 $lang = [
     'cn' => [
@@ -128,44 +144,4 @@ $lang = [
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
             <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
             <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
-            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td><?php echo $lang['qm_range']; ?>:</td><td>
-                <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
-                <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
-            </td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
-                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo $config['temp_threshold']??65.0;?>" />
-                <select name="temp_unit">
-                    <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>°C</option>
-                    <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>°F</option>
-                </select>
-            </td></tr>
-            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
-            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
-            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo is_array($config['ignore_list']) ? implode("; ", $config['ignore_list']) : $config['ignore_list'];?></textarea></td></tr>
-            <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo is_array($config['focus_list']) ? implode("; ", $config['focus_list']) : $config['focus_list'];?></textarea></td></tr>
-            <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
-                <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
-                <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
-            </td></tr>
-        </table></form>
-    </div>
-    <div class="footer">Pi-Star / Pi-Star Dashboard <?php echo $version; ?>, Mod by BA4SMQ.</div>
-</div>
-</body></html>
+            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type
