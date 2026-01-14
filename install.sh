@@ -6,6 +6,7 @@ if [ "$EUID" -ne 0 ]; then
   exit
 fi
 
+# 1. 准备磁盘与内存空间
 mount -o remount,rw /
 mount -o remount,size=32M /run 2>/dev/null 
 
@@ -49,10 +50,23 @@ else
     exit 1
 fi
 
+# 清理内存盘缓存防止重载失败
 rm -rf /run/log/journal/* 2>/dev/null
 
 systemctl daemon-reload
 systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
+echo "--------------------------------------"
 echo "安装与权限加固完成！"
+
+# --- 核心改进：读取程序版本号 ---
+ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
+if [ -z "$ACTUAL_VER" ]; then
+    echo "当前部署版本: v3.0.15 (无法从核心程序读取)"
+else
+    echo "当前部署版本: $ACTUAL_VER"
+fi
+# --------------------------------------
+
+systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
