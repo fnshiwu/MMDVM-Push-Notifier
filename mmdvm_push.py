@@ -10,7 +10,7 @@ from threading import Semaphore
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.5"
+VERSION = "v3.1.6"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -178,7 +178,7 @@ class PushService:
                     return response.read().decode()
             except:
                 if i == retries: return None
-                time.sleep(1)
+                time.sleep(2)  # 增加重试间隔，等待网络恢复
 
     @classmethod
     def send(cls, config, type_label, body_text, is_voice=True, async_mode=True):
@@ -245,19 +245,30 @@ class MMDVMMonitor:
 
     def run(self):
         conf = ConfigManager.get_config()
-        print("[INFO] 正在初始化网络探测...")
-        for i in range(3):
+        print("[INFO] 正在进入冷启动网络探测循环...")
+        
+        # 优化探测机制：最多等待 60 秒直到外网连通
+        network_ok = False
+        for i in range(30):
             ip_check = subprocess.getoutput("hostname -I").strip()
-            if ip_check and not ip_check.startswith("127."): break
+            if ip_check and not ip_check.startswith("127."):
+                try:
+                    # 尝试通过域名访问外网，验证 DNS 和公网路由
+                    urllib.request.urlopen("http://connectivitycheck.gstatic.com/generate_204", timeout=3)
+                    network_ok = True
+                    print(f"[INFO] 网络就绪 (尝试 {i+1})")
+                    break
+                except:
+                    pass
             time.sleep(2)
         
         if conf.get('boot_push_enabled', True):
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
-            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            # --- 核心修改：改为同步发送 (async_mode=False) 以确保重试机制生效 ---
+            status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
+            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **外网状态**: {status}\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            # 同步发送，利用内部重试机制确保首条必达
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
-            print(f"[INFO] 启动通知发送尝试完成，当前 IP: {ip}")
 
         print(f"[INFO] {VERSION} 监控就绪，正在监听日志行...")
         while True:
