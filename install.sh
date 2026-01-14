@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 增强型安装脚本 (v3.0.9 启动强化版)
+# MMDVM-Push-Notifier 增强型安装脚本 (v3.0.10 启动强化版)
 # 开发者: BA4SMQ
 
 # 确保以 root 权限运行
@@ -31,7 +31,7 @@ fi
 chown www-data:www-data $CONFIG_FILE
 chmod 664 $CONFIG_FILE
 
-echo "3. 部署 Web 管理页面 (解决 404)..."
+echo "3. 部署 Web 管理页面"
 # Pi-Star 标准后台路径
 WEB_DIR="/var/www/dashboard/admin"
 
@@ -54,7 +54,7 @@ SERVICE_FILE="/etc/systemd/system/mmdvm_push.service"
 # 现场生成 service 文件，整合严格的资源限制
 cat <<EOF > $SERVICE_FILE
 [Unit]
-Description=MMDVM Log Push Notifier (v3.0.9)
+Description=MMDVM Log Push Notifier (v3.0.10)
 After=network-online.target
 Wants=network-online.target
 
