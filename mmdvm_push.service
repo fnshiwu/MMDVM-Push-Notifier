@@ -1,6 +1,6 @@
 [Unit]
 Description=MMDVM Log Push Notifier
-# 1. 增加依赖项，确保网络和 MMDVM 主程序都启动了再跑脚本
+# 确保网络和 MMDVM 主程序都启动了再跑脚本
 After=network-online.target mmdvmhost.service
 Wants=network-online.target mmdvmhost.service
 
@@ -10,22 +10,21 @@ User=root
 Group=root
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
 
-# 2. 增加冷启动缓冲：给系统多留一点挂载内存盘和写日志的时间
+# 增加冷启动缓冲
 ExecStartPre=/bin/sleep 20
 
-ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
+# 核心修复：加入 -u 参数确保日志实时输出到系统日志
+ExecStart=/usr/bin/python3 -u /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
 
-# 3. 核心修复：如果启动失败（没找到日志），无限次自动重启，每次等 10 秒
+# 如果启动失败，无限次自动重启，每次等 10 秒
 Restart=always
 RestartSec=10
-# 取消启动次数限制，直到成功启动为止
 StartLimitInterval=0
 
-# 4. 资源限制保持不变
+# 资源限制
 NoNewPrivileges=true
 CPUQuota=30%
 MemoryMax=150M
 
 [Install]
 WantedBy=multi-user.target
-
