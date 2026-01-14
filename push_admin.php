@@ -144,4 +144,44 @@ $lang = [
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
             <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
             <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
-            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type
+            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['qm_range']; ?>:</td><td>
+                <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
+                <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
+            </td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
+                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo $config['temp_threshold']??65.0;?>" />
+                <select name="temp_unit">
+                    <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>°C</option>
+                    <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>°F</option>
+                </select>
+            </td></tr>
+            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
+            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
+            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
+            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['ignore_list']??'');?></textarea></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
+            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['focus_list']??'');?></textarea></td></tr>
+            <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
+                <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
+                <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
+            </td></tr>
+        </table></form>
+    </div>
+    <div class="footer">Pi-Star / Pi-Star Dashboard <?php echo $version; ?>, Mod by BA4SMQ.</div>
+</div>
+</body></html>
