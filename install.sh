@@ -1,72 +1,67 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 强化版安装脚本 (v3.0.15) - 修复空间与路径问题
+# MMDVM-Push-Notifier S+ 安装脚本 (v3.1.6-S+)
+# 功能: 安装核心、Web、服务文件，并保证权限与防护
 
-if [ "$EUID" -ne 0 ]; then 
-  echo "请使用 sudo 运行此脚本: sudo ./install.sh"
-  exit
+set -e
+
+if [ "$EUID" -ne 0 ]; then
+  echo "请使用 sudo 运行: sudo ./install.sh"
+  exit 1
 fi
 
-# 1. 准备磁盘与内存空间
-mount -o remount,rw /
-mount -o remount,size=32M /run 2>/dev/null 
-
-echo "1. 正在创建并设置目录权限..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
-mkdir -p $INSTALL_DIR
-chown -R pi-star:pi-star $INSTALL_DIR
-chmod -R 755 $INSTALL_DIR
-
-echo "2. 初始化配置文件并【强制开放权限】..."
 CONFIG_FILE="/etc/mmdvm_push.json"
-if [ ! -f "$CONFIG_FILE" ]; then
-    echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
-fi
-chown www-data:www-data $CONFIG_FILE
-chmod 666 $CONFIG_FILE
-echo "配置文件权限已设置为 666"
-
-echo "3. 部署 Web 管理页面 (软链接模式)..."
 WEB_DIR="/var/www/dashboard/admin"
-if [ -d "$WEB_DIR" ]; then    
-    ln -sf $INSTALL_DIR/push_admin.php $WEB_DIR/push_admin.php
-    ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
-    chown www-data:www-data $INSTALL_DIR/push_admin.php
-fi
-
-echo "4. 授权网页端【一键更新】免密权限..."
+SERVICE_FILE="$INSTALL_DIR/mmdvm_push.service"
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
-chmod +x $UPDATE_SCRIPT
-if ! grep -q "$UPDATE_SCRIPT" /etc/sudoers; then    
-    echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT" | tee -a /etc/sudoers
-    echo "Sudoers 免密授权完成"
+
+echo "--- 安装目录准备 ---"
+mkdir -p "$INSTALL_DIR"
+chown -R pi-star:pi-star "$INSTALL_DIR"
+chmod -R 755 "$INSTALL_DIR"
+
+echo "--- 配置文件初始化 ---"
+if [ ! -f "$CONFIG_FILE" ]; then
+  echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > "$CONFIG_FILE"
+fi
+chown www-data:www-data "$CONFIG_FILE"
+chmod 666 "$CONFIG_FILE"
+
+echo "--- 部署 Web 管理页面 ---"
+if [ -d "$WEB_DIR" ]; then
+  ln -sf "$INSTALL_DIR/push_admin.php" "$WEB_DIR/push_admin.php"
+  ln -sf "$INSTALL_DIR/push_admin.php" /var/www/dashboard/push_admin.php
+  chown www-data:www-data "$INSTALL_DIR/push_admin.php"
 fi
 
-echo "5. 配置并启动系统服务..."
-if [ -f "$INSTALL_DIR/mmdvm_push.service" ]; then
-    cp $INSTALL_DIR/mmdvm_push.service /etc/systemd/system/
-    chmod 644 /etc/systemd/system/mmdvm_push.service
+echo "--- 授权网页端更新脚本免密 ---"
+chmod +x "$UPDATE_SCRIPT"
+if ! grep -q "$UPDATE_SCRIPT" /etc/sudoers; then
+  echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT" | tee -a /etc/sudoers
+fi
+
+echo "--- 部署 systemd 服务 ---"
+if [ -f "$SERVICE_FILE" ]; then
+  cp "$SERVICE_FILE" /etc/systemd/system/
+  chmod 644 /etc/systemd/system/mmdvm_push.service
 else
-    echo "错误: 在 $INSTALL_DIR 中找不到 mmdvm_push.service 文件！"
-    exit 1
+  echo "错误: 找不到服务文件 $SERVICE_FILE"
+  exit 1
 fi
 
-# 清理内存盘缓存防止重载失败
-rm -rf /run/log/journal/* 2>/dev/null
+# 清理内存盘日志防止挂载失败
+mount -o remount,size=32M /run 2>/dev/null || true
+rm -rf /run/log/journal/* 2>/dev/null || true
 
 systemctl daemon-reload
 systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
-echo "--------------------------------------"
-echo "安装与权限加固完成！"
-
-# --- 核心改进：读取程序版本号 ---
-ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
+# ===== 版本号读取保护 =====
+ACTUAL_VER=$(python3 "$INSTALL_DIR/mmdvm_push.py" --version 2>/dev/null)
 if [ -z "$ACTUAL_VER" ]; then
-    echo "当前部署版本: v3.0.15 (无法从核心程序读取)"
-else
-    echo "当前部署版本: $ACTUAL_VER"
+  ACTUAL_VER="v3.1.6-S+ (默认)"
 fi
-# --------------------------------------
-
+echo "当前部署版本: $ACTUAL_VER"
 systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
+echo "--- 安装完成 ---"
