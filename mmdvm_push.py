@@ -254,7 +254,7 @@ class MMDVMMonitor:
             if ip_check and not ip_check.startswith("127."):
                 try:
                     # 尝试通过域名访问外网，验证 DNS 和公网路由
-                    urllib.request.urlopen("http://connectivitycheck.gstatic.com/generate_204", timeout=3)
+                    urllib.request.urlopen("http://www.apple.com/library/test/success.html", timeout=3)
                     network_ok = True
                     print(f"[INFO] 网络就绪 (尝试 {i+1})")
                     break
@@ -266,7 +266,7 @@ class MMDVMMonitor:
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
             status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **外网状态**: {status}\n🌐 **内网IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            body = (f"🚀 **设备已上线** ({VERSION})\n🌐 **网络状态**: {status}\n🛠️ **管理IP**: {ip}\n🌡️ **系统温度**: {temp_str}\n📊 **CPU占用**: {cpu}%\n💾 **内存占用**: {mem}\n⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             # 同步发送，利用内部重试机制确保首条必达
             PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
 
