@@ -1,191 +1,67 @@
-<?php
-session_start();
+#!/bin/bash
+# MMDVM-Push-Notifier 核心全自动更新脚本 (v3.0.15)
+# 适用平台: Pi-Star / Debian
 
-// ===== 配置与核心路径 =====
-$configFile = '/etc/mmdvm_push.json';
-$serviceName = 'mmdvm_push.service';
-$scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
-$updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
+echo "--- 开始执行一键更新流程 ---"
 
-// ===== 获取实时版本号 =====
-$version = trim(@shell_exec("python3 $scriptPath --version 2>/dev/null"));
-if (empty($version)) { $version = 'v3.1.6-S+'; }
+# 1. 切换磁盘至读写模式 (原生指令优先)
+echo "正在请求磁盘写入权限..."
+sudo mount -o remount,rw / 2>/dev/null
+# 尝试兼容 Pi-Star 自带脚本
+sudo /usr/local/bin/rpi-rw 2>/dev/null || sudo /usr/bin/rpi-rw 2>/dev/null
 
-// ===== 磁盘读写安全函数 =====
-function set_disk($mode) {
-    static $lock = false;
-    if ($lock) return;
-    $lock = true;
-    @shell_exec("sudo mount -o remount,$mode / 2>/dev/null");
-    @shell_exec("sudo /usr/local/bin/rpi-$mode 2>/dev/null");
-}
+# 2. 进入项目目录并修复 Git 信任问题
+INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+cd $INSTALL_DIR || { echo "错误: 无法进入目录 $INSTALL_DIR"; exit 1; }
 
-// ===== 初始化配置文件 =====
-if (!file_exists($configFile)) {
-    set_disk('rw');
-    file_put_contents($configFile, json_encode([
-        "my_callsign"=>"BA4SMQ",
-        "min_duration"=>5.0,
-        "ui_lang"=>"cn",
-        "ignore_list"=>"",
-        "focus_list"=>""
-    ], 192));
-    set_disk('ro');
-}
+echo "正在解决 Git 信任限制..."
+git config --global --add safe.directory $INSTALL_DIR
 
-$config = json_decode(file_get_contents($configFile), true) ?: [];
+# 3. 从 GitHub 同步所有核心文件 (py, php, service, sh)
+echo "正在拉取远程仓库最新代码..."
+sudo git fetch --all
+sudo git reset --hard origin/main
 
-// ===== 处理 POST 动作 =====
-$alertMsg = '';
-if ($_SERVER['REQUEST_METHOD']==='POST' || isset($_GET['set_lang'])) {
-    set_disk('rw');
-    $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
+# 4. 解决 /run 空间不足隐患并同步服务配置
+if [ -f "mmdvm_push.service" ]; then
+    echo "正在同步服务配置文件..."
+    sudo cp mmdvm_push.service /etc/systemd/system/
+    
+    # 针对 16MB 安全缓冲区不足的专项修复
+    echo "正在清理并优化系统内存盘空间..."
+    sudo mount -o remount,size=32M /run 2>/dev/null
+    sudo rm -rf /run/log/journal/* 2>/dev/null
+    
+    sudo systemctl daemon-reload
+fi
 
-    try {
-        if (isset($_GET['set_lang'])) {
-            $config['ui_lang'] = $_GET['set_lang'];
-            $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
-            file_put_contents($configFile, json_encode($config, 192));
-        } elseif ($_POST['action']==='save') {
-            $newConfig = [
-                "my_callsign"=>strtoupper(trim($_POST['callsign'])),
-                "min_duration"=>floatval($_POST['min_duration']),
-                "quiet_mode"=>["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
-                "boot_push_enabled"=>isset($_POST['boot_en']),
-                "temp_alert_enabled"=>isset($_POST['temp_en']),
-                "temp_threshold"=>floatval($_POST['temp_th']),
-                "temp_interval"=>intval($_POST['temp_int']),
-                "temp_unit"=>$_POST['temp_unit'] ?? 'C',
-                "push_tg_enabled"=>isset($_POST['tg_en']),
-                "tg_token"=>trim($_POST['tg_token']),
-                "tg_chat_id"=>trim($_POST['tg_chat_id']),
-                "push_wx_enabled"=>isset($_POST['wx_en']),
-                "wx_token"=>trim($_POST['wx_token']),
-                "push_fs_enabled"=>isset($_POST['fs_en']),
-                "fs_webhook"=>trim($_POST['fs_webhook']),
-                "fs_secret"=>trim($_POST['fs_secret']),
-                "ignore_list"=>trim($_POST['ignore_list']),
-                "focus_list"=>trim($_POST['focus_list']),
-                "ui_lang"=>$current_ui_lang
-            ];
-            if(file_put_contents($configFile, json_encode($newConfig,192))!==false){
-                $config = $newConfig;
-                $alertMsg = ($current_ui_lang==='cn')?"✅ 设置已保存！":"✅ Settings Saved!";
-            }
-        } elseif ($_POST['action']==='update') {
-            exec("sudo $updateScript 2>&1", $out, $res);
-            $alertMsg = ($current_ui_lang==='cn')?"🚀 更新指令已发出！服务正在重启...":"🚀 Update triggered! Service restarting...";
-        }
+# 5. 权限重置与加固 (确保网页端可保存设置)
+CONFIG_FILE="/etc/mmdvm_push.json"
+if [ -f "$CONFIG_FILE" ]; then
+    echo "正在修复配置文件权限 (666)..."
+    # 确保 Web 用户 www-data 有权修改
+    sudo chown www-data:www-data $CONFIG_FILE
+    sudo chmod 666 $CONFIG_FILE
+fi
 
-        // 服务控制逻辑
-        $action = $_POST['action'] ?? '';
-        if (in_array($action,['start','stop','restart'])) shell_exec("sudo systemctl $action $serviceName");
-        if ($action==='test') {
-            $out=[]; $res=0;
-            exec("sudo /usr/bin/python3 $scriptPath --test 2>&1",$out,$res);
-            $found=false;
-            foreach($out as $line){if(stripos($line,'Success')!==false){$found=true;break;}}
-            $alertMsg = $found?($current_ui_lang==='cn'?"✅ 测试反馈: Success":"✅ Test Feedback: Success")
-                               :($current_ui_lang==='cn'?"❌ 测试失败":"❌ Test Failed");
-        }
-    } catch(Exception $e){
-        $alertMsg = "❌ 操作异常: ".$e->getMessage();
-    }
+# 6. 赋予脚本自身及安装脚本执行权限
+sudo chmod +x install.sh update.sh
 
-    set_disk('ro');
-}
+# 7. 重启推送服务以加载新版本代码
+echo "正在重启 MMDVM 推送服务..."
+sudo systemctl restart mmdvm_push.service
 
-// ===== 辅助函数：兼容列表显示 =====
-function format_list_for_web($data){
-    if(is_array($data)) return implode("; ",$data);
-    return (string)$data;
-}
+echo "------------------------"
+echo "--- 更新完成 ---"
 
-// ===== 当前状态 =====
-$current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
-$is_cn = ($current_lang==='cn');
-$is_running = (strpos(shell_exec("sudo systemctl status $serviceName"),'active (running)')!==false);
+# 8. 实时读取核心 Python 程序的版本号
+# 逻辑：尝试执行脚本获取版本，失败则显示预设版本
+ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
+if [ -z "$ACTUAL_VER" ]; then
+    echo "当前版本: v3.0.15 (无法通过脚本读取)"
+else
+    echo "当前版本: $ACTUAL_VER"
+fi
 
-$lang = [
-    'cn'=>[
-        'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置',
-        'srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止',
-        'btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','btn_update'=>'检查更新','conf'=>'推送功能设置',
-        'my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
-        'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'设备启动提醒','en_temp'=>'高温预警',
-        'th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)','tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置',
-        'fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)',
-        'list_hint'=>'呼号使用分号 (;) 或换行分隔'
-    ],
-    'en'=>[
-        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings',
-        'srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop',
-        'btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','btn_update'=>'Update Now','conf'=>'Push Notifier Settings',
-        'my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range',
-        'boot_set'=>'Boot Notice','temp_set'=>'Temp Alert','en_boot'=>'Enable Boot Push','en_temp'=>'Enable Temp Alert',
-        'th_temp'=>'Threshold','int_temp'=>'Interval (min)','tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings',
-        'fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List','list_hint'=>'Separate by semicolon (;) or newline'
-    ]
-][$current_lang];
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Push Notifier Settings <?php echo $version;?></title>
-<style>
-textarea{width:95%;height:55px;font-family:monospace;font-size:12px;}
-input[type=text],input[type=password]{width:95%;height:22px;}
-input[type=number],input[type=time]{height:22px;}
-select{height:24px;vertical-align:middle;}
-.time-box{width:80px!important;}
-.num-box{width:60px!important;}
-.btn-test{background:#b55;color:#fff;font-weight:bold;border:1px solid #000;cursor:pointer;}
-.btn-update{background:#444;color:#fff;border:1px solid #000;cursor:pointer;padding:2px 10px;margin-left:15px;}
-table.settings td:first-child{font-weight:bold;text-align:left!important;padding-left:10px;width:35%;}
-table.settings td:last-child{text-align:left!important;padding-left:10px;}
-</style>
-</head>
-<body>
-<div class="container">
-    <div class="header">
-        <div style="font-size:8px;float:left;padding-left:8px;">Hostname: <?php echo exec('hostname');?></div>
-        <h1>Pi-Star Push Notifier - BA4SMQ (<?php echo $version;?>)</h1>
-        <p style="text-align:right;padding-right:10px;color:#fff;">
-            <a href="/" style="color:#fff;"><?php echo $lang['nav_dash'];?></a> |
-            <a href="/admin/" style="color:#fff;"><?php echo $lang['nav_admin'];?></a> |
-            <a href="/admin/power.php" style="color:#fff;"><?php echo $lang['nav_power'];?></a> |
-            <a href="/admin/push_admin.php" style="color:#fff;font-weight:bold;"><?php echo $lang['nav_push'];?></a> |
-            <a href="?set_lang=<?php echo $is_cn?'en':'cn';?>" style="color:#ffff00;">[<?php echo $is_cn?'English':'中文';?>]</a>
-        </p>
-    </div>
-    <div class="contentwide">
-        <?php if($alertMsg) echo "<div style='background:#ffffc0;color:#000;padding:5px;text-align:center;border:1px solid #666;'><b>$alertMsg</b></div>";?>
-        <form method="post">
-        <table class="settings">
-            <!-- 服务控制 -->
-            <thead><tr><th colspan="2"><?php echo $lang['srv_ctrl'];?></th></tr></thead>
-            <tr><td><?php echo $lang['status'];?>:</td><td>
-                <b style="color:<?php echo $is_running?'#008000':'#ff0000';?>"><?php echo $is_running?$lang['run']:$lang['stop'];?></b>
-                <button type="submit" name="action" value="update" class="btn-update"><?php echo $lang['btn_update'];?></button>
-            </td></tr>
-            <tr><td>Action:</td><td>
-                <button type="submit" name="action" value="start"><?php echo $lang['btn_start'];?></button>
-                <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop'];?></button>
-                <button type="submit" name="action" value="restart"><?php echo $lang['btn_res'];?></button>
-            </td></tr>
-            <!-- 推送配置 -->
-            <thead><tr><th colspan="2"><?php echo $lang['conf'];?></th></tr></thead>
-            <tr><td><?php echo $lang['my_call'];?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign']??'';?>"/></td></tr>
-            <tr><td><?php echo $lang['min_dur'];?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration']??5;?>"/></td></tr>
-            <!-- 更多表单控件同前版保留 -->
-        </table>
-        <button type="submit" name="action" value="save"><?php echo $lang['btn_save'];?></button>
-        <button type="submit" name="action" value="test" class="btn-test"><?php echo $lang['btn_test'];?></button>
-        </form>
-    </div>
-    <div class="footer">Pi-Star / Pi-Star Dashboard <?php echo $version;?>, S+ Mod by BA4SMQ.</div>
-</div>
-</body>
-</html>
+# 显示服务状态（只显示前几行，避免刷屏）
+sudo systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
