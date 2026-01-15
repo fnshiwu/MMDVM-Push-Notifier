@@ -1,67 +1,49 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 核心全自动更新脚本 (v3.0.15)
-# 适用平台: Pi-Star / Debian
+# MMDVM-Push-Notifier S+ 自动更新脚本 (v3.1.6-S+)
 
-echo "--- 开始执行一键更新流程 ---"
-
-# 1. 切换磁盘至读写模式 (原生指令优先)
-echo "正在请求磁盘写入权限..."
-sudo mount -o remount,rw / 2>/dev/null
-# 尝试兼容 Pi-Star 自带脚本
-sudo /usr/local/bin/rpi-rw 2>/dev/null || sudo /usr/bin/rpi-rw 2>/dev/null
-
-# 2. 进入项目目录并修复 Git 信任问题
+set -e
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
-cd $INSTALL_DIR || { echo "错误: 无法进入目录 $INSTALL_DIR"; exit 1; }
-
-echo "正在解决 Git 信任限制..."
-git config --global --add safe.directory $INSTALL_DIR
-
-# 3. 从 GitHub 同步所有核心文件 (py, php, service, sh)
-echo "正在拉取远程仓库最新代码..."
-sudo git fetch --all
-sudo git reset --hard origin/main
-
-# 4. 解决 /run 空间不足隐患并同步服务配置
-if [ -f "mmdvm_push.service" ]; then
-    echo "正在同步服务配置文件..."
-    sudo cp mmdvm_push.service /etc/systemd/system/
-    
-    # 针对 16MB 安全缓冲区不足的专项修复
-    echo "正在清理并优化系统内存盘空间..."
-    sudo mount -o remount,size=32M /run 2>/dev/null
-    sudo rm -rf /run/log/journal/* 2>/dev/null
-    
-    sudo systemctl daemon-reload
-fi
-
-# 5. 权限重置与加固 (确保网页端可保存设置)
 CONFIG_FILE="/etc/mmdvm_push.json"
+SCRIPT="$INSTALL_DIR/mmdvm_push.py"
+SERVICE="mmdvm_push.service"
+
+echo "--- 开始一键更新 ---"
+
+# 磁盘切换为读写
+sudo mount -o remount,rw / 2>/dev/null || true
+sudo /usr/local/bin/rpi-rw 2>/dev/null || true
+
+# 进入安装目录
+cd "$INSTALL_DIR" || { echo "错误: $INSTALL_DIR 不存在"; exit 1; }
+
+# Git 拉取最新
+git config --global --add safe.directory "$INSTALL_DIR"
+sudo git fetch --all || { echo "⚠️ Git fetch 失败"; exit 1; }
+sudo git reset --hard origin/main || { echo "⚠️ Git reset 失败"; exit 1; }
+
+# 同步服务文件
+if [ -f "mmdvm_push.service" ]; then
+  sudo cp mmdvm_push.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+fi
+
+# 修复配置文件权限
 if [ -f "$CONFIG_FILE" ]; then
-    echo "正在修复配置文件权限 (666)..."
-    # 确保 Web 用户 www-data 有权修改
-    sudo chown www-data:www-data $CONFIG_FILE
-    sudo chmod 666 $CONFIG_FILE
+  sudo chown www-data:www-data "$CONFIG_FILE"
+  sudo chmod 666 "$CONFIG_FILE"
 fi
 
-# 6. 赋予脚本自身及安装脚本执行权限
-sudo chmod +x install.sh update.sh
-
-# 7. 重启推送服务以加载新版本代码
-echo "正在重启 MMDVM 推送服务..."
-sudo systemctl restart mmdvm_push.service
-
-echo "------------------------"
-echo "--- 更新完成 ---"
-
-# 8. 实时读取核心 Python 程序的版本号
-# 逻辑：尝试执行脚本获取版本，失败则显示预设版本
-ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
-if [ -z "$ACTUAL_VER" ]; then
-    echo "当前版本: v3.0.15 (无法通过脚本读取)"
+# 重启服务
+if systemctl is-active --quiet $SERVICE; then
+  sudo systemctl restart $SERVICE || echo "⚠️ 服务重启失败"
 else
-    echo "当前版本: $ACTUAL_VER"
+  sudo systemctl start $SERVICE || echo "⚠️ 服务启动失败"
 fi
 
-# 显示服务状态（只显示前几行，避免刷屏）
-sudo systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
+# 读取版本号
+ACTUAL_VER=$(python3 "$SCRIPT" --version 2>/dev/null)
+if [ -z "$ACTUAL_VER" ]; then
+  ACTUAL_VER="v3.1.6-S+ (默认)"
+fi
+echo "更新完成, 当前版本: $ACTUAL_VER"
+sudo systemctl status $SERVICE --no-pager | grep -E "Active:|Main PID:"
