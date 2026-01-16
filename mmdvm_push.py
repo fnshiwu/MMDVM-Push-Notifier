@@ -263,69 +263,85 @@ class PushService:
 
     @classmethod
     def _do_push_logic(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        with cls._push_semaphore:
-            # 1. 飞书 (Lark)
-            if config.get('push_fs_enabled') and config.get('fs_webhook'):
-                try:
-                    ts = str(int(time.time()))
-                    template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
-                    fs_payload = {
-                        "msg_type": "interactive",
-                        "card": {
-                            "header": {
-                                "title": {"tag": "plain_text", "content": type_label},
-                                "template": template
-                            },
-                            "elements": [{
-                                "tag": "div",
-                                "text": {"tag": "lark_md", "content": body_text}
-                            }]
-                        }
-                    }
-                    if config.get('fs_secret'):
-                        fs_payload["timestamp"] = ts
-                        fs_payload["sign"] = cls.get_fs_sign(config['fs_secret'], ts)
-                    
-                    cls.post_with_retry(
-                        config['fs_webhook'],
-                        data=json.dumps(fs_payload).encode('utf-8'),
-                        is_json=True
-                    )
-                except Exception as e:
-                    logger.error(f"Feishu push failed: {e}")
+        # Remove redundant semaphore if executor already limits concurrency, 
+        # but keep it if we want to limit active push executions specifically.
+        # Given max_workers=3 in executor, this semaphore is redundant but harmless.
+        # Refactored for clarity.
+        
+        # 1. Feishu
+        if config.get('push_fs_enabled') and config.get('fs_webhook'):
+            cls._push_feishu(config, type_label, body_text, is_voice)
 
-            # 2. 微信 (PushPlus)
-            if config.get('push_wx_enabled') and config.get('wx_token'):
-                try:
-                    br = "<br>"
-                    html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
-                    payload = {
-                        "token": config['wx_token'],
-                        "title": type_label,
-                        "content": html_content,
-                        "template": "html"
-                    }
-                    cls.post_with_retry(
-                        "http://www.pushplus.plus/send",
-                        data=json.dumps(payload).encode('utf-8'),
-                        is_json=True
-                    )
-                except Exception as e:
-                    logger.error(f"WeChat push failed: {e}")
+        # 2. WeChat (PushPlus)
+        if config.get('push_wx_enabled') and config.get('wx_token'):
+            cls._push_wechat(config, type_label, body_text)
 
-            # 3. Telegram (TG)
-            if config.get('push_tg_enabled') and config.get('tg_token') and config.get('tg_chat_id'):
-                try:
-                    text = f"<b>{type_label}</b>\n\n{body_text}"
-                    url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
-                    data = urllib.parse.urlencode({
-                        "chat_id": config['tg_chat_id'],
-                        "text": text,
-                        "parse_mode": "HTML"
-                    }).encode('utf-8')
-                    cls.post_with_retry(url, data=data)
-                except Exception as e:
-                    logger.error(f"Telegram push failed: {e}")
+        # 3. Telegram
+        if config.get('push_tg_enabled') and config.get('tg_token') and config.get('tg_chat_id'):
+            cls._push_telegram(config, type_label, body_text)
+
+    @classmethod
+    def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
+        try:
+            ts = str(int(time.time()))
+            template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
+            fs_payload = {
+                "msg_type": "interactive",
+                "card": {
+                    "header": {
+                        "title": {"tag": "plain_text", "content": type_label},
+                        "template": template
+                    },
+                    "elements": [{
+                        "tag": "div",
+                        "text": {"tag": "lark_md", "content": body_text}
+                    }]
+                }
+            }
+            if config.get('fs_secret'):
+                fs_payload["timestamp"] = ts
+                fs_payload["sign"] = cls.get_fs_sign(config['fs_secret'], ts)
+            
+            cls.post_with_retry(
+                config['fs_webhook'],
+                data=json.dumps(fs_payload).encode('utf-8'),
+                is_json=True
+            )
+        except Exception as e:
+            logger.error(f"Feishu push failed: {e}")
+
+    @classmethod
+    def _push_wechat(cls, config: Dict, type_label: str, body_text: str):
+        try:
+            br = "<br>"
+            html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
+            payload = {
+                "token": config['wx_token'],
+                "title": type_label,
+                "content": html_content,
+                "template": "html"
+            }
+            cls.post_with_retry(
+                "http://www.pushplus.plus/send",
+                data=json.dumps(payload).encode('utf-8'),
+                is_json=True
+            )
+        except Exception as e:
+            logger.error(f"WeChat push failed: {e}")
+
+    @classmethod
+    def _push_telegram(cls, config: Dict, type_label: str, body_text: str):
+        try:
+            text = f"<b>{type_label}</b>\n\n{body_text}"
+            url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
+            data = urllib.parse.urlencode({
+                "chat_id": config['tg_chat_id'],
+                "text": text,
+                "parse_mode": "HTML"
+            }).encode('utf-8')
+            cls.post_with_retry(url, data=data)
+        except Exception as e:
+            logger.error(f"Telegram push failed: {e}")
 
     @classmethod
     def post_with_retry(cls, url: str, data: bytes = None, is_json: bool = False, 
@@ -461,6 +477,12 @@ class MMDVMMonitor:
 
     def get_latest_log(self) -> Optional[str]:
         try:
+            # Optimization: Check today's log first to avoid glob overhead
+            today = datetime.now().strftime("%Y-%m-%d")
+            today_log = os.path.join(LOG_DIR, f"MMDVM-{today}.log")
+            if os.path.exists(today_log) and os.path.getsize(today_log) > 0:
+                return today_log
+
             log_files = [
                 f for f in glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
                 if os.path.isfile(f) and os.path.getsize(f) > 0
