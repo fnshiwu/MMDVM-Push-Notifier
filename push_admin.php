@@ -67,7 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     
     // 服务控制逻辑
     $action = $_POST['action'] ?? '';
-    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
+    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo /bin/systemctl $action $serviceName");
     
     if ($action === 'test') {
         $out = []; $res = 0;
@@ -88,7 +88,7 @@ function format_list_for_web($data) {
 
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
-$is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
+$is_running = (strpos(shell_exec("sudo /bin/systemctl status $serviceName --no-pager"), 'active (running)') !== false);
 
 $lang = [
     'cn' => [
