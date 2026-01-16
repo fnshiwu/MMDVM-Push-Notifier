@@ -35,13 +35,12 @@ if [ -f "mmdvm_push.service" ]; then
     sudo systemctl daemon-reload
 fi
 
-# 5. 权限重置与加固 (确保网页端可保存设置)
+# 5. 权限重置与加固 (最小权限原则)
 CONFIG_FILE="/etc/mmdvm_push.json"
 if [ -f "$CONFIG_FILE" ]; then
-    echo "正在修复配置文件权限 (666)..."
-    # 确保 Web 用户 www-data 有权修改
-    sudo chown www-data:www-data $CONFIG_FILE
-    sudo chmod 666 $CONFIG_FILE
+    echo "正在修复配置文件权限 (660)..."
+    sudo chown mmdvm-push:www-data $CONFIG_FILE
+    sudo chmod 660 $CONFIG_FILE
 fi
 
 # 6. 赋予脚本自身及安装脚本执行权限
