@@ -1,691 +1,194 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+<?php
+session_start();
+$configFile = '/etc/mmdvm_push.json';
+$serviceName = 'mmdvm_push.service';
+$scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
+$updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
 
-import os
-import time
-import json
-import glob
-import re
-import urllib.request
-import urllib.parse
-import sys
-import base64
-import hmac
-import hashlib
-import mmap
-import subprocess
-import atexit
-import logging
-import tempfile
-from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
-from threading import Semaphore, Lock
-from typing import Dict, List, Optional, Tuple, Any
+// --- 获取实时版本号 ---
+$version = trim(@shell_exec("python3 $scriptPath --version"));
+if (empty($version)) { $version = 'v3.1.7'; }
 
-# =========================
-# Global Constants
-# =========================
-VERSION = "v3.1.7"
-CONFIG_FILE = "/etc/mmdvm_push.json"
-LOG_DIR = "/var/log/pi-star/"
-LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
-LOG_POLL_INTERVAL = 0.1
-PUSH_MAX_WORKERS = 3
-PUSH_RETRY = 2
+// 磁盘读写控制
+function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
 
-# 动态调整日志目录权限
-if not os.path.exists(LOG_DIR) or not os.access(LOG_DIR, os.W_OK):
-    fallback_dir = tempfile.gettempdir()
-    print(f"Warning: No write permission for {LOG_DIR}. Falling back to {fallback_dir}")
-    LOG_DIR = fallback_dir
+// 初始化配置文件逻辑
+if (!file_exists($configFile)) {
+    set_disk('rw');
+    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn","ignore_list"=>"","focus_list"=>""], 192));
+    set_disk('ro');
+}
 
-# 配置日志
-logging.basicConfig(
-    filename=os.path.join(LOG_DIR, 'mmdvm_push.log'),
-    level=logging.INFO,
-    format='[%(asctime)s] [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-# 同时输出到控制台
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-console.setFormatter(formatter)
-logging.getLogger('').addHandler(console)
+$config = json_decode(file_get_contents($configFile), true);
 
-logger = logging.getLogger(__name__)
+// 处理所有 POST 动作
+if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
+    set_disk('rw');
+    
+    // 捕获当前语言状态
+    $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 
-
-# =========================
-# Config Manager
-# =========================
-class ConfigManager:
-    _config: Dict = {}
-    _last_mtime: float = 0
-    _check_interval: int = 5
-    _last_check_time: float = 0
-    _lock = Lock()
-
-    @classmethod
-    def get_config(cls) -> Dict:
-        now = time.time()
-        if now - cls._last_check_time < cls._check_interval:
-            return cls._config
-        
-        with cls._lock:
-            # Double-check after acquiring lock
-            if now - cls._last_check_time < cls._check_interval:
-                return cls._config
-            cls._last_check_time = now
-            
-            if not os.path.exists(CONFIG_FILE):
-                return {}
-            
-            try:
-                mtime = os.path.getmtime(CONFIG_FILE)
-                if mtime > cls._last_mtime:
-                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        cls._config = json.load(f)
-                    cls._last_mtime = mtime
-                    logger.debug("Config reloaded")
-            except json.JSONDecodeError as e:
-                logger.error(f"Config JSON parse error: {e}")
-            except OSError as e:
-                logger.error(f"Config file read error: {e}")
-        
-        return cls._config
-
-    @staticmethod
-    def parse_list(data) -> List[str]:
-        if isinstance(data, list):
-            data = ";".join(map(str, data))
-        if not data or not isinstance(data, str):
-            return []
-        return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
-
-
-# =========================
-# Ham Info Manager (修复后的映射表)
-# =========================
-class HamInfoManager:
-    # 使用类级别的缓存，避免实例方法 lru_cache 问题
-    _cache: Dict[str, Dict[str, str]] = {}
-    _cache_lock = Lock()
-    _max_cache_size = 4096
-
-    def __init__(self, id_file: str):
-        self.id_file = id_file
-        self._io_lock = Semaphore(4)
-        self.geo_map = {
-            # 亚洲
-            "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", 
-            "Taiwan": "🇹🇼 中国台湾", "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", 
-            "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜", "Thailand": "🇹🇭 泰国", 
-            "Singapore": "🇸🇬 新加坡", "Malaysia": "🇲🇾 马来西亚", "Indonesia": "🇮🇩 印度尼西亚",
-            "Philippines": "🇵🇭 菲律宾", "Vietnam": "🇻🇳 越南", "India": "🇮🇳 印度", 
-            "Pakistan": "🇵🇰 巴基斯坦", "Sri Lanka": "🇱🇰 斯里兰卡", "Bangladesh": "🇧🇩 孟加拉国", 
-            "Nepal": "🇳🇵 尼泊尔", "Mongolia": "🇲🇳 蒙古",
-            # 中东
-            "United Arab Emirates": "🇦🇪 阿联酋", "UAE": "🇦🇪 阿联酋", "Saudi Arabia": "🇸🇦 沙特", 
-            "Israel": "🇮🇱 以色列", "Turkey": "🇹🇷 土耳其", "Iran": "🇮🇷 伊朗", 
-            "Iraq": "🇮🇶 伊拉克", "Kuwait": "🇰🇼 科威特", "Oman": "🇴🇲 阿曼", 
-            "Qatar": "🇶🇦 卡塔尔", "Jordan": "🇯🇴 约旦", "Lebanon": "🇱🇧 黎巴嫩",
-            "Kazakhstan": "🇰🇿 哈萨克斯坦", "Uzbekistan": "🇺🇿 乌兹别克斯坦",
-            # 欧洲 (修复了错误)
-            "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "Germany": "🇩🇪 德国",
-            "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", 
-            "Portugal": "🇵🇹 葡萄牙", "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", 
-            "Netherlands": "🇳🇱 荷兰", "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", 
-            "Austria": "🇦🇹 奥地利",  # 修复：原来是 🇦ᵗ
-            "Sweden": "🇸🇪 瑞典", "Norway": "🇳🇴 挪威", 
-            "Denmark": "🇩🇰 丹麦",  # 修复：原来是 🇩麦
-            "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
-            "Czech Republic": "🇨🇿 捷克", "Czechia": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", 
-            "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰", "Romania": "🇷🇴 罗马尼亚", 
-            "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
-            "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", 
-            "Slovenia": "🇸🇮 斯洛文尼亚", "Estonia": "🇪🇪 爱沙尼亚", "Latvia": "🇱🇻 拉脱维亚", 
-            "Lithuania": "🇱🇹 立陶宛", "Iceland": "🇮🇸 冰岛", "Luxembourg": "🇱🇺 卢森堡", 
-            "Monaco": "🇲🇨 摩纳哥", "Cyprus": "🇨🇾 塞浦路斯", "Malta": "🇲🇹 马耳他",
-            # 美洲
-            "United States": "🇺🇸 美国", "USA": "🇺🇸 美国", "Canada": "🇨🇦 加拿大", 
-            "Mexico": "🇲🇽 墨西哥", "Cuba": "🇨🇺 古巴", "Jamaica": "🇯🇲 牙买加", 
-            "Puerto Rico": "🇵🇷 波多黎各", "Dominican Republic": "🇩🇴 多米尼加",
-            "Costa Rica": "🇨🇷 哥斯达黎加", "Panama": "🇵🇦 巴拿马", "Guatemala": "🇬🇹 危地马拉", 
-            "Honduras": "🇭🇳 洪都拉斯", "Brazil": "🇧🇷 巴西", "Argentina": "🇦🇷 阿根廷", 
-            "Chile": "🇨🇱 智利", "Colombia": "🇨🇴 哥伦比亚", "Peru": "🇵🇪 秘鲁", 
-            "Venezuela": "🇻🇪 委内瑞拉", "Uruguay": "🇺🇾 乌拉圭", "Paraguay": "🇵🇾 巴拉圭",
-            "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
-            # 大洋洲
-            "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", 
-            "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
-            # 非洲 (修复摩洛哥)
-            "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", 
-            "Kenya": "🇰🇪 肯尼亚", 
-            "Morocco": "🇲🇦 摩洛哥",  # 修复：原来写成了摩纳哥
-            "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
-            "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", 
-            "Seychelles": "🇸🇨 塞舌尔"
+    if (isset($_GET['set_lang'])) {
+        $config['ui_lang'] = $_GET['set_lang'];
+        $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
+        file_put_contents($configFile, json_encode($config, 192));
+    } elseif ($_POST['action'] === 'save') {
+        // 【核心修复】：名单直接存为字符串，不再强制转换数组，支持分号和换行
+        $newConfig = [
+            "my_callsign" => strtoupper(trim($_POST['callsign'])),
+            "min_duration" => floatval($_POST['min_duration']),
+            "quiet_mode" => ["enabled"=>isset($_POST['qm_en']), "start"=>$_POST['qm_start'], "end"=>$_POST['qm_end']],
+            "boot_push_enabled" => isset($_POST['boot_en']),
+            "temp_alert_enabled" => isset($_POST['temp_en']),
+            "temp_threshold" => floatval($_POST['temp_th']),
+            "temp_interval" => intval($_POST['temp_int']),
+            "temp_unit" => $_POST['temp_unit'] ?? 'C',
+            "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
+            "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
+            "push_fs_enabled" => isset($_POST['fs_en']), "fs_webhook" => trim($_POST['fs_webhook']), "fs_secret" => trim($_POST['fs_secret']),
+            "ignore_list" => trim($_POST['ignore_list']), 
+            "focus_list" => trim($_POST['focus_list']),
+            "ui_lang" => $current_ui_lang
+        ];
+        // 写入文件并更新内存变量
+        if (file_put_contents($configFile, json_encode($newConfig, 448)) !== false) {
+            $config = $newConfig;
+            $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         }
-
-    def get_info(self, callsign: str) -> Dict[str, str]:
-        """获取呼号信息，带手动缓存管理"""
-        # 检查缓存
-        with self._cache_lock:
-            if callsign in self._cache:
-                return self._cache[callsign]
-        
-        result = self._fetch_info(callsign)
-        
-        # 更新缓存
-        with self._cache_lock:
-            # 简单的 LRU：如果超过最大大小，清除一半
-            if len(self._cache) >= self._max_cache_size:
-                keys_to_remove = list(self._cache.keys())[:self._max_cache_size // 2]
-                for k in keys_to_remove:
-                    del self._cache[k]
-            self._cache[callsign] = result
-        
-        return result
-
-    def _fetch_info(self, callsign: str) -> Dict[str, str]:
-        """实际从文件获取信息"""
-        default_result = {"name": "", "loc": "Unknown"}
-        
-        if not os.path.exists(self.id_file):
-            return default_result
-        
-        if not self._io_lock.acquire(timeout=2):
-            logger.warning(f"IO lock timeout for callsign: {callsign}")
-            return default_result
-        
-        try:
-            file_size = os.path.getsize(self.id_file)
-            if file_size == 0:
-                return default_result
-                
-            with open(self.id_file, 'rb') as f:
-                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    query = f",{callsign},".encode('utf-8')
-                    idx = mm.find(query)
-                    if idx == -1:
-                        return default_result
-                    
-                    start = mm.rfind(b'\n', 0, idx) + 1
-                    end = mm.find(b'\n', idx)
-                    if end == -1:
-                        end = len(mm)
-                    line_bytes = mm[start:end]
-                    
-                    try:
-                        line = line_bytes.decode('utf-8')
-                    except UnicodeDecodeError:
-                        line = line_bytes.decode('gb18030', errors='ignore')
-                    
-                    parts = line.split(',')
-                    first_name = parts[2].strip() if len(parts) > 2 else ""
-                    last_name = parts[3].strip() if len(parts) > 3 else ""
-                    city = parts[4].strip().title() if len(parts) > 4 else ""
-                    state = parts[5].strip().upper() if len(parts) > 5 else ""
-                    country = parts[6].strip() if len(parts) > 6 else ""
-                    
-                    # 国家名称映射
-                    if any('\u4e00' <= char <= '\u9fff' for char in country):
-                        for k, v in self.geo_map.items():
-                            if k in country or (len(v.split()) > 1 and v.split()[1] in country):
-                                country = v
-                                break
-                    else:
-                        country = self.geo_map.get(country, country)
-                    
-                    full_name = f"{first_name} {last_name}".strip().upper()
-                    name_part = f" ({full_name})" if full_name else ""
-                    loc = f"{city}, {state} ({country})" if city or state else country
-                    
-                    return {"name": name_part, "loc": loc}
-                    
-        except (OSError, ValueError) as e:
-            logger.debug(f"Error fetching info for {callsign}: {e}")
-            return default_result
-        finally:
-            self._io_lock.release()
-
-
-# =========================
-# Push Service
-# =========================
-class PushService:
-    _max_workers = PUSH_MAX_WORKERS
-    _executor: Optional[ThreadPoolExecutor] = None
-    _push_semaphore = Semaphore(_max_workers)
-    _initialized = False
-
-    @classmethod
-    def _ensure_executor(cls):
-        if cls._executor is None:
-            cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
-            cls._initialized = True
-
-    @staticmethod
-    def get_fs_sign(secret: str, timestamp: str) -> str:
-        string_to_sign = f'{timestamp}\n{secret}'
-        hmac_code = hmac.new(
-            string_to_sign.encode("utf-8"), 
-            digestmod=hashlib.sha256
-        ).digest()
-        return base64.b64encode(hmac_code).decode('utf-8')
-
-    @classmethod
-    def _do_push_logic(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        # Remove redundant semaphore if executor already limits concurrency, 
-        # but keep it if we want to limit active push executions specifically.
-        # Given max_workers=3 in executor, this semaphore is redundant but harmless.
-        # Refactored for clarity.
-        
-        # 1. Feishu
-        if config.get('push_fs_enabled') and config.get('fs_webhook'):
-            cls._push_feishu(config, type_label, body_text, is_voice)
-
-        # 2. WeChat (PushPlus)
-        if config.get('push_wx_enabled') and config.get('wx_token'):
-            cls._push_wechat(config, type_label, body_text)
-
-        # 3. Telegram
-        if config.get('push_tg_enabled') and config.get('tg_token') and config.get('tg_chat_id'):
-            cls._push_telegram(config, type_label, body_text)
-
-    @classmethod
-    def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        try:
-            ts = str(int(time.time()))
-            template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
-            fs_payload = {
-                "msg_type": "interactive",
-                "card": {
-                    "header": {
-                        "title": {"tag": "plain_text", "content": type_label},
-                        "template": template
-                    },
-                    "elements": [{
-                        "tag": "div",
-                        "text": {"tag": "lark_md", "content": body_text}
-                    }]
-                }
-            }
-            if config.get('fs_secret'):
-                fs_payload["timestamp"] = ts
-                fs_payload["sign"] = cls.get_fs_sign(config['fs_secret'], ts)
-            
-            cls.post_with_retry(
-                config['fs_webhook'],
-                data=json.dumps(fs_payload).encode('utf-8'),
-                is_json=True
-            )
-        except Exception as e:
-            logger.error(f"Feishu push failed: {e}")
-
-    @classmethod
-    def _push_wechat(cls, config: Dict, type_label: str, body_text: str):
-        try:
-            br = "<br>"
-            html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
-            payload = {
-                "token": config['wx_token'],
-                "title": type_label,
-                "content": html_content,
-                "template": "html"
-            }
-            cls.post_with_retry(
-                "http://www.pushplus.plus/send",
-                data=json.dumps(payload).encode('utf-8'),
-                is_json=True
-            )
-        except Exception as e:
-            logger.error(f"WeChat push failed: {e}")
-
-    @classmethod
-    def _push_telegram(cls, config: Dict, type_label: str, body_text: str):
-        try:
-            text = f"<b>{type_label}</b>\n\n{body_text}"
-            url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
-            data = urllib.parse.urlencode({
-                "chat_id": config['tg_chat_id'],
-                "text": text,
-                "parse_mode": "HTML"
-            }).encode('utf-8')
-            cls.post_with_retry(url, data=data)
-        except Exception as e:
-            logger.error(f"Telegram push failed: {e}")
-
-    @classmethod
-    def post_with_retry(cls, url: str, data: bytes = None, is_json: bool = False, 
-                        retries: int = PUSH_RETRY) -> Optional[str]:
-        last_error = None
-        for i in range(retries + 1):
-            try:
-                req = urllib.request.Request(url, data=data, method='POST')
-                if is_json:
-                    req.add_header('Content-Type', 'application/json; charset=utf-8')
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    return response.read().decode('utf-8')
-            except urllib.error.HTTPError as e:
-                last_error = e
-                logger.warning(f"HTTP error {e.code} on attempt {i+1}/{retries+1}: {url}")
-            except urllib.error.URLError as e:
-                last_error = e
-                logger.warning(f"URL error on attempt {i+1}/{retries+1}: {e.reason}")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Request error on attempt {i+1}/{retries+1}: {e}")
-            
-            if i < retries:
-                time.sleep(2 ** i)  # 指数退避
-        
-        logger.error(f"All retries failed for {url}: {last_error}")
-        return None
-
-    @classmethod
-    def send(cls, config: Dict, type_label: str, body_text: str, 
-             is_voice: bool = True, async_mode: bool = True):
-        cls._ensure_executor()
-        if async_mode:
-            cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
-        else:
-            cls._do_push_logic(config, type_label, body_text, is_voice)
-
-    @classmethod
-    def shutdown(cls):
-        if cls._executor is not None:
-            cls._executor.shutdown(wait=True)
-            cls._executor = None
-
-
-atexit.register(PushService.shutdown)
-
-
-# =========================
-# Monitor Logic
-# =========================
-class MMDVMMonitor:
-    def __init__(self):
-        self.last_msg: Dict[str, Any] = {"call": "", "ts": 0}
-        self.last_temp_alert_time: float = 0
-        self.last_temp_check_time: float = 0
-        self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
-        
-        # 更健壮的正则表达式
-        self.re_master = re.compile(
-            r'end of (?P<v_type>(?:voice\s*|data\s*)?)transmission from '
-            r'(?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), '
-            r'(?P<dur>\d+\.?\d*) seconds'
-            r'(?:, (?P<loss>\d+)% packet loss)?'
-            r'(?:, BER: (?P<ber>\d+\.?\d*)%)?',
-            re.IGNORECASE
-        )
-
-    def is_quiet_time(self, conf: Dict) -> bool:
-        quiet_config = conf.get('quiet_mode', {})
-        if not quiet_config.get('enabled'):
-            return False
-        
-        now = datetime.now().strftime("%H:%M")
-        start = quiet_config.get('start', '23:00')
-        end = quiet_config.get('end', '07:00')
-        
-        if start <= end:
-            return start <= now <= end
-        else:
-            return now >= start or now <= end
-
-    def get_sys_info(self) -> Tuple[str, str, str]:
-        try:
-            ip = subprocess.getoutput("hostname -I").split()[0]
-        except (IndexError, Exception):
-            ip = "Unknown"
-        
-        try:
-            cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'").strip()
-        except Exception:
-            cpu = "0"
-        
-        try:
-            mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
-        except Exception:
-            mem = "0%"
-        
-        return ip, cpu, mem
-
-    def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
-        try:
-            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                temp_c = float(f.read().strip()) / 1000.0
-            unit = conf.get('temp_unit', 'C').upper()
-            val = (temp_c * 9/5) + 32 if unit == 'F' else temp_c
-            return f"{val:.1f}°{unit}", val
-        except (FileNotFoundError, ValueError, OSError):
-            return "N/A", 0.0
-
-    def check_temp_alert(self, conf: Dict):
-        if not conf.get('temp_alert_enabled'):
-            return
-        
-        now = time.time()
-        if now - self.last_temp_check_time < 60:
-            return
-        self.last_temp_check_time = now
-        
-        display_str, current_val = self.get_current_temp(conf)
-        threshold = float(conf.get('temp_threshold', 65.0))
-        
-        if current_val >= threshold:
-            interval_sec = int(conf.get('temp_interval', 30)) * 60
-            if now - self.last_temp_alert_time > interval_sec:
-                self.last_temp_alert_time = now
-                alert_body = (
-                    f"🚨 **硬件高温预警**\n"
-                    f"🔥 **当前温度**: {display_str}\n"
-                    f"⚠️ **预警阈值**: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
-                    f"⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}"
-                )
-                PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
-
-    def get_latest_log(self) -> Optional[str]:
-        try:
-            # Optimization: Check today's log first to avoid glob overhead
-            today = datetime.now().strftime("%Y-%m-%d")
-            today_log = os.path.join(LOG_DIR, f"MMDVM-{today}.log")
-            if os.path.exists(today_log) and os.path.getsize(today_log) > 0:
-                return today_log
-
-            log_files = [
-                f for f in glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
-                if os.path.isfile(f) and os.path.getsize(f) > 0
-            ]
-            return max(log_files, key=os.path.getmtime) if log_files else None
-        except (OSError, ValueError):
-            return None
-
-    def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
-        """检查网络连通性"""
-        logger.info("正在进入冷启动网络探测循环...")
-        
-        for i in range(max_attempts):
-            try:
-                ip_check = subprocess.getoutput("hostname -I").strip()
-                if ip_check and not ip_check.startswith("127."):
-                    urllib.request.urlopen(
-                        "http://www.apple.com/library/test/success.html",
-                        timeout=3
-                    )
-                    logger.info(f"网络就绪 (尝试 {i+1})")
-                    return True
-            except Exception:
-                pass
-            time.sleep(interval)
-        
-        logger.warning("网络探测超时")
-        return False
-
-    def run(self):
-        conf = ConfigManager.get_config()
-        network_ok = self.check_network()
-        
-        if conf.get('boot_push_enabled', True):
-            ip, cpu, mem = self.get_sys_info()
-            temp_str, _ = self.get_current_temp(conf)
-            status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-            body = (
-                f"🚀 **设备已上线** ({VERSION})\n"
-                f"🌐 **网络状态**: {status}\n"
-                f"🛠️ **管理IP**: {ip}\n"
-                f"🌡️ **系统温度**: {temp_str}\n"
-                f"📊 **CPU占用**: {cpu}%\n"
-                f"💾 **内存占用**: {mem}\n"
-                f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
-
-        logger.info(f"{VERSION} 监控就绪，正在监听日志行...")
-        
-        while True:
-            try:
-                current_log = self.get_latest_log()
-                if not current_log:
-                    time.sleep(5)
-                    continue
-                
-                self._tail_log(current_log)
-                
-            except KeyboardInterrupt:
-                logger.info("收到中断信号，正在退出...")
-                break
-            except Exception as e:
-                logger.error(f"循环异常: {e}")
-                time.sleep(5)
-
-    def _tail_log(self, log_file: str):
-        """持续读取日志文件"""
-        try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(0, 2)  # 移到文件末尾
-                last_check = time.time()
-                
-                while True:
-                    # 定期检查是否有新日志文件
-                    if time.time() - last_check > 5:
-                        new_log = self.get_latest_log()
-                        if new_log and new_log != log_file:
-                            logger.info(f"切换到新日志: {new_log}")
-                            return  # 退出当前循环，让外层重新打开新文件
-                        last_check = time.time()
-                    
-                    line = f.readline()
-                    if not line:
-                        time.sleep(LOG_POLL_INTERVAL)
-                        continue
-                    
-                    self.process_line(line)
-                    
-        except FileNotFoundError:
-            logger.warning(f"日志文件不存在: {log_file}")
-        except PermissionError:
-            logger.error(f"无权限读取日志: {log_file}")
-
-    def process_line(self, line: str):
-        if "end of" not in line.lower():
-            return
-        
-        match = self.re_master.search(line)
-        if not match:
-            return
-        
-        conf = ConfigManager.get_config()
-        self.check_temp_alert(conf)
-        
-        call = match.group('call').upper()
-        try:
-            dur = float(match.group('dur'))
-        except ValueError:
-            return
-        
-        if self.is_quiet_time(conf):
-            return
-        
-        # 过滤逻辑
-        focus = ConfigManager.parse_list(conf.get('focus_list', []))
-        ignore = ConfigManager.parse_list(conf.get('ignore_list', []))
-        my_callsign = conf.get('my_callsign', '').upper()
-        min_duration = float(conf.get('min_duration', 1.0))
-        
-        if focus and call not in focus:
-            return
-        if call == my_callsign or call in ignore or dur < min_duration:
-            return
-
-        # 防抖：同一呼号 3 秒内不重复推送
-        curr_ts = time.time()
-        if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3:
-            return
-        self.last_msg.update({"call": call, "ts": curr_ts})
-        
-        # 构建推送内容
-        info = self.ham_manager.get_info(call)
-        temp_str, _ = self.get_current_temp(conf)
-        
-        v_type = match.group('v_type') or ''
-        is_voice = 'data' not in v_type.lower()
-        
-        slot = ""
-        if "Slot 1" in line:
-            slot = " (Slot 1)"
-        elif "Slot 2" in line:
-            slot = " (Slot 2)"
-
-        target = match.group('target').strip()
-        loss = match.group('loss') or '0'
-        ber = match.group('ber') or '0.0'
-        
-        body = (
-            f"👤 **呼号**: {call}{info['name']}\n"
-            f"👥 **群组**: {target}\n"
-            f"📍 **地区**: {info['loc']}\n"
-            f"📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"⏳ **时长**: {dur}秒\n"
-            f"📦 **丢失**: {loss}%\n"
-            f"📉 **误码**: {ber}%\n"
-            f"🌡️ **温度**: {temp_str}"
-        )
-        
-        type_label = f"{'🎙️ 语音通联' if is_voice else '💾 数据模式'}{slot}"
-        PushService.send(conf, type_label, body, is_voice=is_voice)
-        logger.info(f"推送完成: {call} -> {target}")
-
-
-# =========================
-# Entry
-# =========================
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        print(VERSION)
-        sys.exit(0)
+    } elseif ($_POST['action'] === 'update') {
+        // 执行一键更新脚本
+        exec("sudo $updateScript 2>&1", $out, $res);
+        $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新指令已发出！服务正在重启..." : "🚀 Update triggered! Service restarting...";
+    }
     
-    monitor = MMDVMMonitor()
+    set_disk('ro');
     
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
-        conf = ConfigManager.get_config()
-        ip, cpu, mem = monitor.get_sys_info()
-        temp_str, _ = monitor.get_current_temp(conf)
-        test_body = (
-            f"通道测试成功 ({VERSION})\n"
-            f"🌐 **IP**: {ip}\n"
-            f"🌡️ **温度**: {temp_str}\n"
-            f"📊 **CPU**: {cpu}%\n"
-            f"💾 **内存**: {mem}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}"
-        )
-        PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
-        print("Success")
-    else:
-        monitor.run()
+    // 服务控制逻辑
+    $action = $_POST['action'] ?? '';
+    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo systemctl $action $serviceName");
+    
+    if ($action === 'test') {
+        $out = []; $res = 0;
+        exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
+        $foundSuccess = false;
+        foreach ($out as $line) { if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; } }
+        $alertMsg = $foundSuccess ? 
+            ($current_ui_lang == 'cn' ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success") : 
+            ($current_ui_lang == 'cn' ? "❌ 测试失败" : "❌ Test Failed");
+    }
+}
+
+// 兼容函数：将 JSON 中的名单（无论是旧版数组还是新版字符串）正确显示在网页
+function format_list_for_web($data) {
+    if (is_array($data)) return implode("; ", $data);
+    return (string)$data;
+}
+
+$current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
+$is_cn = ($current_lang === 'cn');
+$is_running = (strpos(shell_exec("sudo systemctl status $serviceName"), 'active (running)') !== false);
+
+$lang = [
+    'cn' => [
+        'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','btn_update'=>'检查更新','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
+        'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'设备启动提醒','en_temp'=>'高温预警','th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)',
+        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'呼号使用分号 (;) 或换行分隔'
+    ],
+    'en' => [
+        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','btn_update'=>'Update Now','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range',
+        'boot_set'=>'Boot Notice','temp_set'=>'Temp Alert','en_boot'=>'Enable Boot Push','en_temp'=>'Enable Temp Alert','th_temp'=>'Threshold','int_temp'=>'Interval (min)',
+        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List','list_hint'=>'Separate by semicolon (;) or newline'
+    ]
+][$current_lang];
+?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" type="text/css" href="css/pistar-css.php" />
+    <title>Push Notifier Settings <?php echo $version; ?></title>
+    <style type="text/css">
+        textarea { width: 95%; height: 55px; font-family: monospace; font-size: 12px; }
+        input[type="text"], input[type="password"] { width: 95%; height: 22px; }
+        input[type="number"], input[type="time"] { height: 22px; }
+        select { height: 24px; vertical-align: middle; }
+        .time-box { width: 80px !important; }
+        .num-box { width: 60px !important; }
+        .btn-test { background: #b55; color: white; font-weight: bold; border: 1px solid #000; cursor: pointer; }
+        .btn-update { background: #444; color: #fff; border: 1px solid #000; cursor: pointer; padding: 2px 10px; margin-left: 15px; }
+        table.settings td:first-child { font-weight: bold; text-align: left !important; padding-left: 10px; width: 35%; }
+        table.settings td:last-child { text-align: left !important; padding-left: 10px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: <?php echo exec('hostname'); ?></div>
+        <h1>Pi-Star Push Notifier - BA4SMQ (<?php echo $version; ?>)</h1>
+        <p style="text-align: right; padding-right: 10px; color: #fff;">
+            <a href="/" style="color: #fff;"><?php echo $lang['nav_dash']; ?></a> | 
+            <a href="/admin/" style="color: #fff;"><?php echo $lang['nav_admin']; ?></a> | 
+            <a href="/admin/power.php" style="color: #fff;"><?php echo $lang['nav_power']; ?></a> | 
+            <a href="/admin/push_admin.php" style="color: #fff; font-weight: bold;"><?php echo $lang['nav_push']; ?></a> | 
+            <a href="?set_lang=<?php echo $is_cn?'en':'cn';?>" style="color: #ffff00;">[<?php echo $is_cn?'English':'中文';?>]</a>
+        </p>
+    </div>
+    <div class="contentwide">
+        <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:5px; text-align:center; border:1px solid #666;'><b>$alertMsg</b></div>"; ?>
+        <form method="post">
+        <table class="settings">
+            <thead><tr><th colspan="2"><?php echo $lang['srv_ctrl']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['status']; ?>:</td><td>
+                <b style="color:<?php echo $is_running?'#008000':'#ff0000';?>"><?php echo $is_running ? $lang['run'] : $lang['stop']; ?></b>
+                <button type="submit" name="action" value="update" class="btn-update"><?php echo $lang['btn_update']; ?></button>
+            </td></tr>
+            <tr><td>Action:</td><td>
+                <button type="submit" name="action" value="start"><?php echo $lang['btn_start']; ?></button>
+                <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop']; ?></button>
+                <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
+            </td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
+            <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
+            <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['qm_range']; ?>:</td><td>
+                <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
+                <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
+            </td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
+                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo $config['temp_threshold']??65.0;?>" />
+                <select name="temp_unit">
+                    <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>°C</option>
+                    <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>°F</option>
+                </select>
+            </td></tr>
+            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
+            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
+            <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
+            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
+            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
+            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['ignore_list']??'');?></textarea></td></tr>
+            <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
+            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['focus_list']??'');?></textarea></td></tr>
+            <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
+                <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
+                <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
+            </td></tr>
+        </table></form>
+    </div>
+    <div class="footer">Pi-Star / Pi-Star Dashboard <?php echo $version; ?>, Mod by BA4SMQ.</div>
+</div>
+</body></html>
