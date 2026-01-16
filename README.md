@@ -155,7 +155,6 @@ Configuration changes take effect automatically without restarting the service.
 ⚠️ **Do NOT reinstall for upgrades**
 
 ```bash
-ssh pi-star@pi-star.local
 rpi-rw
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash update.sh
@@ -175,12 +174,8 @@ python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 
 ```bash
 rpi-rw
-sudo systemctl stop mmdvm_push.service
-sudo systemctl disable mmdvm_push.service
-sudo rm -rf /home/pi-star/MMDVM-Push-Notifier
-sudo rm -f /etc/mmdvm_push.json
-sudo rm -f /var/www/dashboard/admin/push_admin.php
-sudo systemctl daemon-reload
+cd /home/pi-star/MMDVM-Push-Notifier
+sudo bash uninstall.sh
 ```
 
 ---
