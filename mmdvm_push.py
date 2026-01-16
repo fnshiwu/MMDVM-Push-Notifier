@@ -583,17 +583,31 @@ class MMDVMMonitor:
         if conf.get('boot_push_enabled', True):
             ip, cpu, mem = self.get_sys_info()
             temp_str, _ = self.get_current_temp(conf)
-            status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-            body = (
-                f"🚀 **设备已上线** ({VERSION})\n"
-                f"🌐 **网络状态**: {status}\n"
-                f"🛠️ **管理IP**: {ip}\n"
-                f"🌡️ **系统温度**: {temp_str}\n"
-                f"📊 **CPU占用**: {cpu}%\n"
-                f"💾 **内存占用**: {mem}\n"
-                f"⏰ **时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
+            lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+            if lang == 'en':
+                status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
+                body = (
+                    f"🚀 <b>Device Online</b> ({VERSION})\n"
+                    f"🌐 <b>Network</b>: {status}\n"
+                    f"🛠️ <b>Admin IP</b>: {ip}\n"
+                    f"🌡️ <b>System Temp</b>: {temp_str}\n"
+                    f"📊 <b>CPU</b>: {cpu}%\n"
+                    f"💾 <b>Memory</b>: {mem}\n"
+                    f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                PushService.send(conf, "⚙️ Boot Notice", body, is_voice=False, async_mode=False)
+            else:
+                status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
+                body = (
+                    f"🚀 <b>设备已上线</b> ({VERSION})\n"
+                    f"🌐 <b>网络状态</b>: {status}\n"
+                    f"🛠️ <b>管理IP</b>: {ip}\n"
+                    f"🌡️ <b>系统温度</b>: {temp_str}\n"
+                    f"📊 <b>CPU占用</b>: {cpu}%\n"
+                    f"💾 <b>内存占用</b>: {mem}\n"
+                    f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
+                PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
 
         logger.info(f"{VERSION} 监控就绪，正在监听日志行...")
         
@@ -694,20 +708,33 @@ class MMDVMMonitor:
         target = match.group('target').strip()
         loss = match.group('loss') or '0'
         ber = match.group('ber') or '0.0'
-        
-        body = (
-            f"👤 **呼号**: {call}{info['name']}\n"
-            f"👥 **群组**: {target}\n"
-            f"📍 **地区**: {info['loc']}\n"
-            f"📅 **日期**: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}\n"
-            f"⏳ **时长**: {dur}秒\n"
-            f"📦 **丢失**: {loss}%\n"
-            f"📉 **误码**: {ber}%\n"
-            f"🌡️ **温度**: {temp_str}"
-        )
-        
-        type_label = f"{'🎙️ 语音通联' if is_voice else '💾 数据模式'}{slot}"
+        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+        if lang == 'en':
+            body = (
+                f"👤 <b>Callsign</b>: {call}{info['name']}\n"
+                f"👥 <b>Talkgroup</b>: {target}\n"
+                f"📍 <b>Location</b>: {info['loc']}\n"
+                f"📅 <b>Date</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
+                f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"⏳ <b>Duration</b>: {dur}s\n"
+                f"📦 <b>Loss</b>: {loss}%\n"
+                f"📉 <b>BER</b>: {ber}%\n"
+                f"🌡️ <b>Temp</b>: {temp_str}"
+            )
+            type_label = f"{'🎙️ Voice QSO' if is_voice else '💾 Data Mode'}{slot}"
+        else:
+            body = (
+                f"👤 <b>呼号</b>: {call}{info['name']}\n"
+                f"👥 <b>群组</b>: {target}\n"
+                f"📍 <b>地区</b>: {info['loc']}\n"
+                f"📅 <b>日期</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
+                f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+                f"⏳ <b>时长</b>: {dur}秒\n"
+                f"📦 <b>丢失</b>: {loss}%\n"
+                f"📉 <b>误码</b>: {ber}%\n"
+                f"🌡️ <b>温度</b>: {temp_str}"
+            )
+            type_label = f"{'🎙️ 语音通联' if is_voice else '💾 数据模式'}{slot}"
         PushService.send(conf, type_label, body, is_voice=is_voice)
         logger.info(f"推送完成: {call} -> {target}")
 
@@ -726,15 +753,27 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
         temp_str, _ = monitor.get_current_temp(conf)
-        test_body = (
-            f"通道测试成功 ({VERSION})\n"
-            f"🌐 **IP**: {ip}\n"
-            f"🌡️ **温度**: {temp_str}\n"
-            f"📊 **CPU**: {cpu}%\n"
-            f"💾 **内存**: {mem}\n"
-            f"⏰ **时间**: {datetime.now().strftime('%H:%M:%S')}"
-        )
-        PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
+        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+        if lang == 'en':
+            test_body = (
+                f"Channel test success ({VERSION})\n"
+                f"🌐 <b>IP</b>: {ip}\n"
+                f"🌡️ <b>Temp</b>: {temp_str}\n"
+                f"📊 <b>CPU</b>: {cpu}%\n"
+                f"💾 <b>Memory</b>: {mem}\n"
+                f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
+            )
+            PushService.send(conf, "🔔 Test Notification", test_body, is_voice=False, async_mode=False)
+        else:
+            test_body = (
+                f"通道测试成功 ({VERSION})\n"
+                f"🌐 <b>IP</b>: {ip}\n"
+                f"🌡️ <b>温度</b>: {temp_str}\n"
+                f"📊 <b>CPU</b>: {cpu}%\n"
+                f"💾 <b>内存</b>: {mem}\n"
+                f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}"
+            )
+            PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
         print("Success")
     elif len(sys.argv) > 1 and sys.argv[1] == "--health":
         conf = ConfigManager.get_config()
