@@ -21,18 +21,25 @@ if (!file_exists($configFile)) {
 
 $config = json_decode(file_get_contents($configFile), true);
 
+$csrfToken = $_SESSION['csrf_token'] ?? bin2hex(random_bytes(32));
+$_SESSION['csrf_token'] = $csrfToken;
+
 // 处理所有 POST 动作
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
     
     // 捕获当前语言状态
     $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
+    $valid_csrf = true;
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_GET['set_lang'])) {
+        $valid_csrf = isset($_POST['csrf_token']) && hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token']);
+    }
 
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
         file_put_contents($configFile, json_encode($config, 192));
-    } elseif ($_POST['action'] === 'save') {
+    } elseif ($_POST['action'] === 'save' && $valid_csrf) {
         // 【核心修复】：名单直接存为字符串，不再强制转换数组，支持分号和换行
         $newConfig = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
@@ -57,19 +64,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         } else {
             $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
-    } elseif ($_POST['action'] === 'update') {
+    } elseif ($_POST['action'] === 'update' && $valid_csrf) {
         // 执行一键更新脚本
         exec("sudo $updateScript 2>&1", $out, $res);
         $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新指令已发出！服务正在重启..." : "🚀 Update triggered! Service restarting...";
+    } elseif (isset($_POST['action']) && !$valid_csrf) {
+        $alertMsg = ($current_ui_lang == 'cn') ? "❌ CSRF 校验失败" : "❌ CSRF validation failed";
     }
     
     set_disk('ro');
     
     // 服务控制逻辑
     $action = $_POST['action'] ?? '';
-    if (in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo /bin/systemctl $action $serviceName");
+    if ($valid_csrf && in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo /bin/systemctl $action $serviceName");
     
-    if ($action === 'test') {
+    if ($valid_csrf && $action === 'test') {
         $out = []; $res = 0;
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
         $foundSuccess = false;
@@ -126,7 +135,7 @@ $lang = [
 <body>
 <div class="container">
     <div class="header">
-        <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: <?php echo exec('hostname'); ?></div>
+        <div style="font-size: 8px; text-align: left; padding-left: 8px; float: left;">Hostname: <?php echo htmlspecialchars(exec('hostname'), ENT_QUOTES, 'UTF-8'); ?></div>
         <h1>Pi-Star Push Notifier - BA4SMQ (<?php echo $version; ?>)</h1>
         <p style="text-align: right; padding-right: 10px; color: #fff;">
             <a href="/" style="color: #fff;"><?php echo $lang['nav_dash']; ?></a> | 
@@ -137,8 +146,9 @@ $lang = [
         </p>
     </div>
     <div class="contentwide">
-        <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:5px; text-align:center; border:1px solid #666;'><b>$alertMsg</b></div>"; ?>
+        <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:5px; text-align:center; border:1px solid #666;'><b>".htmlspecialchars($alertMsg, ENT_QUOTES, 'UTF-8')."</b></div>"; ?>
         <form method="post">
+        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>" />
         <table class="settings">
             <thead><tr><th colspan="2"><?php echo $lang['srv_ctrl']; ?></th></tr></thead>
             <tr><td><?php echo $lang['status']; ?>:</td><td>
@@ -151,40 +161,40 @@ $lang = [
                 <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
             </td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
-            <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo $config['my_callsign'];?>" /></td></tr>
-            <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo $config['min_duration'];?>" /></td></tr>
+            <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo htmlspecialchars($config['my_callsign'], ENT_QUOTES, 'UTF-8');?>" /></td></tr>
+            <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo htmlspecialchars((string)$config['min_duration'], ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <tr><td><?php echo $lang['qm_en']; ?>:</td><td><input type="checkbox" name="qm_en" <?php echo ($config['quiet_mode']['enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td><?php echo $lang['qm_range']; ?>:</td><td>
-                <input type="time" name="qm_start" class="time-box" value="<?php echo $config['quiet_mode']['start']??'23:00';?>" /> - 
-                <input type="time" name="qm_end" class="time-box" value="<?php echo $config['quiet_mode']['end']??'07:00';?>" />
+                <input type="time" name="qm_start" class="time-box" value="<?php echo htmlspecialchars($config['quiet_mode']['start']??'23:00', ENT_QUOTES, 'UTF-8');?>" /> - 
+                <input type="time" name="qm_end" class="time-box" value="<?php echo htmlspecialchars($config['quiet_mode']['end']??'07:00', ENT_QUOTES, 'UTF-8');?>" />
             </td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['boot_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en_boot']; ?>:</td><td><input type="checkbox" name="boot_en" <?php echo ($config['boot_push_enabled']??true)?'checked':'';?> /></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['temp_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en_temp']; ?>:</td><td><input type="checkbox" name="temp_en" <?php echo ($config['temp_alert_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td><?php echo $lang['th_temp']; ?>:</td><td>
-                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo $config['temp_threshold']??65.0;?>" />
+                <input type="number" step="0.1" name="temp_th" class="num-box" value="<?php echo htmlspecialchars((string)($config['temp_threshold']??65.0), ENT_QUOTES, 'UTF-8');?>" />
                 <select name="temp_unit">
                     <option value="C" <?php echo ($config['temp_unit']??'C')=='C'?'selected':'';?>>°C</option>
                     <option value="F" <?php echo ($config['temp_unit']??'C')=='F'?'selected':'';?>>°F</option>
                 </select>
             </td></tr>
-            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo $config['temp_interval']??30;?>" /></td></tr>
+            <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo htmlspecialchars((string)($config['temp_interval']??30), ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo $config['tg_token']??'';?>" /></td></tr>
-            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo $config['tg_chat_id']??'';?>" /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo htmlspecialchars($config['tg_token']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
+            <tr><td>Chat ID:</td><td><input type="text" name="tg_chat_id" value="<?php echo htmlspecialchars($config['tg_chat_id']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['wx_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="wx_en" <?php echo ($config['push_wx_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo $config['wx_token']??'';?>" /></td></tr>
+            <tr><td>Token:</td><td><input type="password" name="wx_token" value="<?php echo htmlspecialchars($config['wx_token']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['fs_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="fs_en" <?php echo ($config['push_fs_enabled']??false)?'checked':'';?> /></td></tr>
-            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo $config['fs_webhook']??'';?>" /></td></tr>
-            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo $config['fs_secret']??'';?>" /></td></tr>
+            <tr><td>Webhook:</td><td><input type="text" name="fs_webhook" value="<?php echo htmlspecialchars($config['fs_webhook']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
+            <tr><td>Secret:</td><td><input type="password" name="fs_secret" value="<?php echo htmlspecialchars($config['fs_secret']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['ign_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['ignore_list']??'');?></textarea></td></tr>
+            <tr><td colspan="2" align="center"><textarea name="ignore_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo htmlspecialchars(format_list_for_web($config['ignore_list']??''), ENT_QUOTES, 'UTF-8');?></textarea></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['foc_list']; ?></th></tr></thead>
-            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo format_list_for_web($config['focus_list']??'');?></textarea></td></tr>
+            <tr><td colspan="2" align="center"><textarea name="focus_list" placeholder="<?php echo $lang['list_hint'];?>"><?php echo htmlspecialchars(format_list_for_web($config['focus_list']??''), ENT_QUOTES, 'UTF-8');?></textarea></td></tr>
             <tr><td colspan="2" style="text-align: center !important; padding: 25px 0;">
                 <button type="submit" name="action" value="save" style="width:130px; height:34px; font-weight:bold;"><?php echo $lang['btn_save']; ?></button>
                 <button type="submit" name="action" value="test" class="btn-test" style="width:130px; height:34px; margin-left: 30px;"><?php echo $lang['btn_test']; ?></button>
