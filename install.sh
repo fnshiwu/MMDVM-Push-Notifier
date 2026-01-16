@@ -7,7 +7,17 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # 1. 准备磁盘与内存空间
-mount -o remount,rw /
+echo "1. 正在获取磁盘写入权限..."
+mount -o remount,rw / 2>/dev/null
+# 尝试兼容 Pi-Star 自带脚本
+if command -v rpi-rw >/dev/null 2>&1; then
+    rpi-rw
+elif [ -f /usr/local/bin/rpi-rw ]; then
+    /usr/local/bin/rpi-rw
+elif [ -f /usr/bin/rpi-rw ]; then
+    /usr/bin/rpi-rw
+fi
+
 mount -o remount,size=32M /run 2>/dev/null 
 
 echo "1. 正在创建并设置目录权限..."
