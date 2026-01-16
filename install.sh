@@ -51,10 +51,6 @@ chown www-data:www-data $INSTALL_DIR/push_admin.php
 echo "4. 授权网页端【一键更新】免密权限..."
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
 chmod +x $UPDATE_SCRIPT
-if ! grep -q "$UPDATE_SCRIPT" /etc/sudoers; then    
-    echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT" | tee -a /etc/sudoers
-    echo "Sudoers 免密授权完成"
-fi
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
 cat > "$SUDO_D" <<'EOF'
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
@@ -63,6 +59,7 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
 EOF
 chmod 440 "$SUDO_D"
+visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 
 echo "5. 配置并启动系统服务..."
 if [ -f "$INSTALL_DIR/mmdvm_push.service" ]; then
