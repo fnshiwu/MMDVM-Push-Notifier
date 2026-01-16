@@ -23,17 +23,18 @@ mount -o remount,size=32M /run 2>/dev/null
 echo "1. 正在创建并设置目录权限..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 mkdir -p $INSTALL_DIR
-chown -R pi-star:pi-star $INSTALL_DIR
+id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-push
+chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 
-echo "2. 初始化配置文件并【强制开放权限】..."
+echo "2. 初始化配置文件并设置最小权限..."
 CONFIG_FILE="/etc/mmdvm_push.json"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
 fi
-chown www-data:www-data $CONFIG_FILE
-chmod 666 $CONFIG_FILE
-echo "配置文件权限已设置为 666"
+chown mmdvm-push:www-data $CONFIG_FILE
+chmod 660 $CONFIG_FILE
+echo "配置文件权限已设置为 660 (owner: mmdvm-push, group: www-data)"
 
 echo "3. 部署 Web 管理页面 (软链接模式)..."
 WEB_DIR="/var/www/dashboard/admin"
