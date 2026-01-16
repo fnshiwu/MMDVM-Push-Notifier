@@ -531,13 +531,23 @@ class MMDVMMonitor:
             interval_sec = int(conf.get('temp_interval', 30)) * 60
             if now - self.last_temp_alert_time > interval_sec:
                 self.last_temp_alert_time = now
-                alert_body = (
-                    f"🚨 **硬件高温预警**\n"
-                    f"🔥 **当前温度**: {display_str}\n"
-                    f"⚠️ **预警阈值**: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
-                    f"⏰ **检测时间**: {datetime.now().strftime('%H:%M:%S')}"
-                )
-                PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
+                lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+                if lang == 'en':
+                    alert_body = (
+                        f"🚨 <b>High Temperature Alert</b>\n"
+                        f"🔥 <b>Current Temp</b>: {display_str}\n"
+                        f"⚠️ <b>Threshold</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
+                        f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
+                    )
+                    PushService.send(conf, "🌡️ Hardware Status Warning", alert_body, is_voice=False)
+                else:
+                    alert_body = (
+                        f"🚨 <b>硬件高温预警</b>\n"
+                        f"🔥 <b>当前温度</b>: {display_str}\n"
+                        f"⚠️ <b>预警阈值</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
+                        f"⏰ <b>检测时间</b>: {datetime.now().strftime('%H:%M:%S')}"
+                    )
+                    PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
 
     def get_latest_log(self) -> Optional[str]:
         try:
