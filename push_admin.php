@@ -180,6 +180,15 @@ $lang = [
                 </select>
             </td></tr>
             <tr><td><?php echo $lang['int_temp']; ?>:</td><td><input type="number" name="temp_int" class="num-box" value="<?php echo htmlspecialchars((string)($config['temp_interval']??30), ENT_QUOTES, 'UTF-8');?>" /></td></tr>
+            <tr><td colspan="2" style="padding-left:10px; color:#555; font-size:12px;">
+                <?php 
+                    $unit = htmlspecialchars($config['temp_unit']??'C', ENT_QUOTES, 'UTF-8'); 
+                    $interval = intval($config['temp_interval']??30);
+                    echo $is_cn 
+                        ? "提示：温度达到或超过阈值时触发预警；发送间隔为 {$interval} 分钟；当前单位 {$unit}" 
+                        : "Hint: Alert triggers when temperature ≥ threshold; interval {$interval} min; unit {$unit}";
+                ?>
+            </td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['tg_set']; ?></th></tr></thead>
             <tr><td><?php echo $lang['en']; ?>:</td><td><input type="checkbox" name="tg_en" <?php echo ($config['push_tg_enabled']??false)?'checked':'';?> /></td></tr>
             <tr><td>Token:</td><td><input type="password" name="tg_token" value="<?php echo htmlspecialchars($config['tg_token']??'', ENT_QUOTES, 'UTF-8');?>" /></td></tr>
