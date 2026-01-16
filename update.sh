@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 核心全自动更新脚本 (v3.0.15)
+# MMDVM-Push-Notifier 核心全自动更新脚本 (v3.1.7)
 # 适用平台: Pi-Star / Debian
 
 echo "--- 开始执行一键更新流程 ---"
