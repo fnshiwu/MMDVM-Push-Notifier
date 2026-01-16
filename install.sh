@@ -37,12 +37,16 @@ chmod 660 $CONFIG_FILE
 echo "配置文件权限已设置为 660 (owner: mmdvm-push, group: www-data)"
 
 echo "3. 部署 Web 管理页面 (软链接模式)..."
-WEB_DIR="/var/www/dashboard/admin"
-if [ -d "$WEB_DIR" ]; then    
-    ln -sf $INSTALL_DIR/push_admin.php $WEB_DIR/push_admin.php
+WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
+for D in $WEB_DIRS; do
+    if [ -d "$D" ]; then
+        ln -sf $INSTALL_DIR/push_admin.php "$D/push_admin.php"
+    fi
+done
+if [ -d "/var/www/dashboard" ]; then
     ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
-    chown www-data:www-data $INSTALL_DIR/push_admin.php
 fi
+chown www-data:www-data $INSTALL_DIR/push_admin.php
 
 echo "4. 授权网页端【一键更新】免密权限..."
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
