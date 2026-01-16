@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Tuple, Any
 # =========================
 VERSION = "v3.1.7"
 CONFIG_FILE = "/etc/mmdvm_push.json"
-LOG_DIR = "/var/log/pi-star/"
+MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 LOG_POLL_INTERVAL = 0.1
 PUSH_MAX_WORKERS = 3
@@ -40,14 +40,13 @@ if len(sys.argv) > 1 and sys.argv[1] == "--version":
     sys.exit(0)
 
 # 动态调整日志目录权限（不向 stdout 打印，后续使用 logger 提示）
-FALLBACK_LOG_DIR = None
-if not os.path.exists(LOG_DIR) or not os.access(LOG_DIR, os.W_OK):
-    FALLBACK_LOG_DIR = tempfile.gettempdir()
-    LOG_DIR = FALLBACK_LOG_DIR
+APP_LOG_DIR = "/var/log/pi-star/"
+if not os.path.exists(APP_LOG_DIR) or not os.access(APP_LOG_DIR, os.W_OK):
+    APP_LOG_DIR = tempfile.gettempdir()
 
 # 配置日志
 logging.basicConfig(
-    filename=os.path.join(LOG_DIR, 'mmdvm_push.log'),
+    filename=os.path.join(APP_LOG_DIR, 'mmdvm_push.log'),
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
@@ -61,9 +60,9 @@ logging.getLogger('').addHandler(console)
 
 logger = logging.getLogger(__name__)
 
-# 如果日志目录降级，使用 logger 记录提示（不会影响 --version 输出）
-if FALLBACK_LOG_DIR:
-    logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {LOG_DIR}")
+# 如果应用日志目录降级，记录提示（不会影响 --version 输出）
+if APP_LOG_DIR != "/var/log/pi-star/":
+    logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
 
 
 # =========================
@@ -539,12 +538,12 @@ class MMDVMMonitor:
         try:
             # Optimization: Check today's log first to avoid glob overhead
             today = datetime.now().strftime("%Y-%m-%d")
-            today_log = os.path.join(LOG_DIR, f"MMDVM-{today}.log")
+            today_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{today}.log")
             if os.path.exists(today_log) and os.path.getsize(today_log) > 0:
                 return today_log
 
             log_files = [
-                f for f in glob.glob(os.path.join(LOG_DIR, "MMDVM-*.log"))
+                f for f in glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
                 if os.path.isfile(f) and os.path.getsize(f) > 0
             ]
             return max(log_files, key=os.path.getmtime) if log_files else None
