@@ -735,8 +735,10 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         status = {
             "version": VERSION,
-            "log_dir": LOG_DIR,
-            "log_writable": os.access(LOG_DIR, os.W_OK),
+            "app_log_dir": APP_LOG_DIR,
+            "app_log_writable": os.access(APP_LOG_DIR, os.W_OK),
+            "mmdvm_log_dir": MMDVM_LOG_DIR,
+            "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
             "config_exists": os.path.exists(CONFIG_FILE),
             "config_valid": isinstance(conf, dict) and len(conf) > 0,
             "time": datetime.now().isoformat(timespec="seconds")
