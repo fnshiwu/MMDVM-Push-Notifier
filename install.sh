@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 强化版安装脚本 (v3.0.15) - 修复空间与路径问题
+# MMDVM-Push-Notifier 强化版安装脚本 (v3.1.7) - 修复空间与路径问题
 
 if [ "$EUID" -ne 0 ]; then 
   echo "请使用 sudo 运行此脚本: sudo ./install.sh"
