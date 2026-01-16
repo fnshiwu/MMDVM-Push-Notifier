@@ -5,8 +5,8 @@ Wants=network-online.target mmdvmhost.service
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=mmdvm-push
+Group=mmdvm-push
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
 
 # 冷启动缓冲
