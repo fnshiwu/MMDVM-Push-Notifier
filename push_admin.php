@@ -51,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "ui_lang" => $current_ui_lang
         ];
         // 写入文件并更新内存变量
-        if (file_put_contents($configFile, json_encode($newConfig, 192)) !== false) {
+        if (file_put_contents($configFile, json_encode($newConfig, 448)) !== false) {
             $config = $newConfig;
             $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         }
