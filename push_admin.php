@@ -50,7 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "focus_list" => trim($_POST['focus_list']),
             "ui_lang" => $current_ui_lang
         ];
-        @shell_exec("sudo chown www-data:www-data $configFile; sudo chmod 666 $configFile");
         $writeRes = file_put_contents($configFile, json_encode($newConfig, 448));
         if ($writeRes !== false) {
             $config = $newConfig;
