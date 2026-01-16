@@ -16,6 +16,7 @@ import mmap
 import subprocess
 import atexit
 import logging
+import tempfile
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
@@ -33,12 +34,26 @@ LOG_POLL_INTERVAL = 0.1
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
 
+# 动态调整日志目录权限
+if not os.path.exists(LOG_DIR) or not os.access(LOG_DIR, os.W_OK):
+    fallback_dir = tempfile.gettempdir()
+    print(f"Warning: No write permission for {LOG_DIR}. Falling back to {fallback_dir}")
+    LOG_DIR = fallback_dir
+
 # 配置日志
 logging.basicConfig(
+    filename=os.path.join(LOG_DIR, 'mmdvm_push.log'),
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+# 同时输出到控制台
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
+console.setFormatter(formatter)
+logging.getLogger('').addHandler(console)
+
 logger = logging.getLogger(__name__)
 
 
