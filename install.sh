@@ -51,6 +51,14 @@ if ! grep -q "$UPDATE_SCRIPT" /etc/sudoers; then
     echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT" | tee -a /etc/sudoers
     echo "Sudoers 免密授权完成"
 fi
+SUDO_D="/etc/sudoers.d/mmdvm-push-web"
+cat > "$SUDO_D" <<'EOF'
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
+EOF
+chmod 440 "$SUDO_D"
 
 echo "5. 配置并启动系统服务..."
 if [ -f "$INSTALL_DIR/mmdvm_push.service" ]; then
