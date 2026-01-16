@@ -34,11 +34,16 @@ LOG_POLL_INTERVAL = 0.1
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
 
-# 动态调整日志目录权限
+# 版本查询快速返回，避免初始化日志等产生额外输出
+if len(sys.argv) > 1 and sys.argv[1] == "--version":
+    print(VERSION)
+    sys.exit(0)
+
+# 动态调整日志目录权限（不向 stdout 打印，后续使用 logger 提示）
+FALLBACK_LOG_DIR = None
 if not os.path.exists(LOG_DIR) or not os.access(LOG_DIR, os.W_OK):
-    fallback_dir = tempfile.gettempdir()
-    print(f"Warning: No write permission for {LOG_DIR}. Falling back to {fallback_dir}")
-    LOG_DIR = fallback_dir
+    FALLBACK_LOG_DIR = tempfile.gettempdir()
+    LOG_DIR = FALLBACK_LOG_DIR
 
 # 配置日志
 logging.basicConfig(
@@ -55,6 +60,10 @@ console.setFormatter(formatter)
 logging.getLogger('').addHandler(console)
 
 logger = logging.getLogger(__name__)
+
+# 如果日志目录降级，使用 logger 记录提示（不会影响 --version 输出）
+if FALLBACK_LOG_DIR:
+    logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {LOG_DIR}")
 
 
 # =========================
