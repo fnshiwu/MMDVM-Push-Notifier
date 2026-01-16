@@ -10,7 +10,7 @@ $version = trim(@shell_exec("python3 $scriptPath --version"));
 if (empty($version)) { $version = 'v3.1.7'; }
 
 // 磁盘读写控制
-function set_disk($mode) { @shell_exec("sudo rpi-$mode"); }
+function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$mode / 2>/dev/null"); }
 
 // 初始化配置文件逻辑
 if (!file_exists($configFile)) {
@@ -50,10 +50,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "focus_list" => trim($_POST['focus_list']),
             "ui_lang" => $current_ui_lang
         ];
-        // 写入文件并更新内存变量
-        if (file_put_contents($configFile, json_encode($newConfig, 448)) !== false) {
+        @shell_exec("sudo chown www-data:www-data $configFile; sudo chmod 666 $configFile");
+        $writeRes = file_put_contents($configFile, json_encode($newConfig, 448));
+        if ($writeRes !== false) {
             $config = $newConfig;
             $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
+        } else {
+            $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update') {
         // 执行一键更新脚本
