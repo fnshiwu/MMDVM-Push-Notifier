@@ -30,7 +30,7 @@ VERSION = "v3.1.7"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
-LOG_POLL_INTERVAL = 0.1
+LOG_POLL_INTERVAL = 0.2
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
 
@@ -462,6 +462,8 @@ class MMDVMMonitor:
         self.last_temp_alert_time: float = 0
         self.last_temp_check_time: float = 0
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
+        self._cpu_prev_total = None
+        self._cpu_prev_idle = None
         
         # 更健壮的正则表达式
         self.re_master = re.compile(
@@ -487,22 +489,71 @@ class MMDVMMonitor:
         else:
             return now >= start or now <= end
 
+    def _cpu_percent_proc(self) -> str:
+        try:
+            with open("/proc/stat", "r") as f:
+                parts = f.readline().split()
+            if not parts or parts[0] != "cpu":
+                return "0"
+            nums = [int(x) for x in parts[1:]]
+            user = nums[0] if len(nums) > 0 else 0
+            nice = nums[1] if len(nums) > 1 else 0
+            system = nums[2] if len(nums) > 2 else 0
+            idle = nums[3] if len(nums) > 3 else 0
+            iowait = nums[4] if len(nums) > 4 else 0
+            irq = nums[5] if len(nums) > 5 else 0
+            softirq = nums[6] if len(nums) > 6 else 0
+            steal = nums[7] if len(nums) > 7 else 0
+            idleall = idle + iowait
+            nonidle = user + nice + system + irq + softirq + steal
+            total = idleall + nonidle
+            prev_total = self._cpu_prev_total
+            prev_idle = self._cpu_prev_idle
+            self._cpu_prev_total = total
+            self._cpu_prev_idle = idleall
+            if prev_total is None or prev_idle is None:
+                return "0"
+            totald = total - prev_total
+            idled = idleall - prev_idle
+            pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
+            return f"{pct:.1f}"
+        except Exception:
+            return "0"
+
+    def _mem_percent_proc(self) -> str:
+        mt = ma = None
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mt = float(line.split()[1])
+                elif line.startswith("MemAvailable:"):
+                    ma = float(line.split()[1])
+                if mt is not None and ma is not None:
+                    break
+        if mt and ma:
+            used = (mt - ma) / mt * 100.0
+            return f"{used:.1f}%"
+        return "0%"
+
     def get_sys_info(self) -> Tuple[str, str, str]:
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
         except (IndexError, Exception):
             ip = "Unknown"
-        
         try:
-            cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'").strip()
+            cpu = self._cpu_percent_proc()
         except Exception:
-            cpu = "0"
-        
+            try:
+                cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'").strip()
+            except Exception:
+                cpu = "0"
         try:
-            mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
+            mem = self._mem_percent_proc()
         except Exception:
-            mem = "0%"
-        
+            try:
+                mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
+            except Exception:
+                mem = "0%"
         return ip, cpu, mem
 
     def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
