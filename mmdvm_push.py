@@ -95,7 +95,8 @@ class ConfigManager:
                 mtime = os.path.getmtime(CONFIG_FILE)
                 if mtime > cls._last_mtime:
                     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        cls._config = json.load(f)
+                        raw = json.load(f)
+                    cls._config = cls._validate_config(raw)
                     cls._last_mtime = mtime
                     logger.debug("Config reloaded")
             except json.JSONDecodeError as e:
@@ -112,6 +113,41 @@ class ConfigManager:
         if not data or not isinstance(data, str):
             return []
         return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
+
+    @staticmethod
+    def _validate_config(raw: Dict) -> Dict:
+        defaults = {
+            "my_callsign": "",
+            "min_duration": 1.0,
+            "quiet_mode": {"enabled": False, "start": "23:00", "end": "07:00"},
+            "boot_push_enabled": True,
+            "temp_alert_enabled": False,
+            "temp_threshold": 65.0,
+            "temp_interval": 30,
+            "temp_unit": "C",
+            "push_tg_enabled": False, "tg_token": "", "tg_chat_id": "",
+            "push_wx_enabled": False, "wx_token": "",
+            "push_fs_enabled": False, "fs_webhook": "", "fs_secret": "",
+            "ignore_list": "", "focus_list": "", "ui_lang": "cn"
+        }
+        conf = dict(defaults)
+        if isinstance(raw, dict):
+            conf.update(raw)
+        try:
+            conf["min_duration"] = max(0.1, float(conf.get("min_duration", defaults["min_duration"])))
+            conf["temp_threshold"] = float(conf.get("temp_threshold", defaults["temp_threshold"]))
+            conf["temp_interval"] = int(conf.get("temp_interval", defaults["temp_interval"]))
+            unit = str(conf.get("temp_unit", "C")).upper()
+            conf["temp_unit"] = "F" if unit == "F" else "C"
+            qm = conf.get("quiet_mode", defaults["quiet_mode"])
+            conf["quiet_mode"] = {
+                "enabled": bool(qm.get("enabled", False)),
+                "start": qm.get("start", "23:00"),
+                "end": qm.get("end", "07:00")
+            }
+        except Exception as e:
+            logger.warning(f"Config sanitize error: {e}")
+        return conf
 
 
 # =========================
@@ -696,5 +732,26 @@ if __name__ == "__main__":
         )
         PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
         print("Success")
+    elif len(sys.argv) > 1 and sys.argv[1] == "--health":
+        conf = ConfigManager.get_config()
+        status = {
+            "version": VERSION,
+            "log_dir": LOG_DIR,
+            "log_writable": os.access(LOG_DIR, os.W_OK),
+            "config_exists": os.path.exists(CONFIG_FILE),
+            "config_valid": isinstance(conf, dict) and len(conf) > 0,
+            "time": datetime.now().isoformat(timespec="seconds")
+        }
+        print(json.dumps(status, ensure_ascii=False))
     else:
+        # 简单就绪等待：日志目录存在 + 获取 IP 成功
+        start_t = time.time()
+        for i in range(10):
+            try:
+                _ip = subprocess.getoutput("hostname -I").split()[0]
+            except Exception:
+                _ip = ""
+            if os.path.exists(LOG_DIR) and _ip:
+                break
+            time.sleep(2)
         monitor.run()
