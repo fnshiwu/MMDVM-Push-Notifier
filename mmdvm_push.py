@@ -44,25 +44,30 @@ APP_LOG_DIR = "/var/log/pi-star/"
 if not os.path.exists(APP_LOG_DIR) or not os.access(APP_LOG_DIR, os.W_OK):
     APP_LOG_DIR = tempfile.gettempdir()
 
-# 配置日志
-logging.basicConfig(
-    filename=os.path.join(APP_LOG_DIR, 'mmdvm_push.log'),
-    level=logging.INFO,
-    format='[%(asctime)s] [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-# 同时输出到控制台
-console = logging.StreamHandler()
-console.setLevel(logging.INFO)
-formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-console.setFormatter(formatter)
-logging.getLogger('').addHandler(console)
-
-logger = logging.getLogger(__name__)
-
-# 如果应用日志目录降级，记录提示（不会影响 --version 输出）
-if APP_LOG_DIR != "/var/log/pi-star/":
-    logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
+logger = None
+def setup_logging():
+    global logger
+    try:
+        logging.basicConfig(
+            filename=os.path.join(APP_LOG_DIR, 'mmdvm_push.log'),
+            level=logging.INFO,
+            format='[%(asctime)s] [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+    except PermissionError:
+        logging.basicConfig(
+            level=logging.INFO,
+            format='[%(asctime)s] [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
+    console.setFormatter(formatter)
+    logging.getLogger('').addHandler(console)
+    logger = logging.getLogger(__name__)
+    if APP_LOG_DIR != "/var/log/pi-star/":
+        logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
 
 
 # =========================
@@ -715,9 +720,9 @@ if __name__ == "__main__":
         print(VERSION)
         sys.exit(0)
     
-    monitor = MMDVMMonitor()
-    
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        setup_logging()
+        monitor = MMDVMMonitor()
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
         temp_str, _ = monitor.get_current_temp(conf)
@@ -745,6 +750,8 @@ if __name__ == "__main__":
         }
         print(json.dumps(status, ensure_ascii=False))
     else:
+        setup_logging()
+        monitor = MMDVMMonitor()
         # 简单就绪等待：日志目录存在 + 获取 IP 成功
         start_t = time.time()
         for i in range(10):
@@ -752,7 +759,7 @@ if __name__ == "__main__":
                 _ip = subprocess.getoutput("hostname -I").split()[0]
             except Exception:
                 _ip = ""
-            if os.path.exists(LOG_DIR) and _ip:
+            if os.path.exists(MMDVM_LOG_DIR) and _ip:
                 break
             time.sleep(2)
         monitor.run()
