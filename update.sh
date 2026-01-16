@@ -22,6 +22,10 @@ echo "正在拉取远程仓库最新代码..."
 sudo git fetch --all
 sudo git reset --hard origin/main
 
+# 3.5 确保服务用户存在并修复目录所有权
+id -u mmdvm-push >/dev/null 2>&1 || sudo useradd -r -s /usr/sbin/nologin -U mmdvm-push
+sudo chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
+
 # 4. 解决 /run 空间不足隐患并同步服务配置
 if [ -f "mmdvm_push.service" ]; then
     echo "正在同步服务配置文件..."
