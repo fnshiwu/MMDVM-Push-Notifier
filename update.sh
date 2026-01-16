@@ -53,6 +53,31 @@ sudo systemctl restart mmdvm_push.service
 echo "------------------------"
 echo "--- 更新完成 ---"
 
+# 确保 sudoers 规则存在
+SUDO_D="/etc/sudoers.d/mmdvm-push-web"
+if [ ! -f "$SUDO_D" ]; then
+cat > "$SUDO_D" <<'EOF'
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
+EOF
+chmod 440 "$SUDO_D"
+fi
+
+# 重新部署 Web 管理页面链接（多路径兼容）
+INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
+for D in $WEB_DIRS; do
+    if [ -d "$D" ]; then
+        sudo ln -sf $INSTALL_DIR/push_admin.php "$D/push_admin.php"
+    fi
+done
+if [ -d "/var/www/dashboard" ]; then
+    sudo ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
+fi
+sudo chown www-data:www-data $INSTALL_DIR/push_admin.php
+
 # 8. 实时读取核心 Python 程序的版本号
 # 逻辑：尝试执行脚本获取版本，失败则显示预设版本
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
