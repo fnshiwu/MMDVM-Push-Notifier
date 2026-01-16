@@ -67,16 +67,17 @@ systemctl daemon-reload
 systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
-echo "--------------------------------------"
-echo "安装与权限加固完成！"
-
-# --- 核心改进：读取程序版本号 ---
-ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
-if [ -z "$ACTUAL_VER" ]; then
-    echo "当前部署版本: v3.0.15 (无法从核心程序读取)"
-else
-    echo "当前部署版本: $ACTUAL_VER"
-fi
-# --------------------------------------
-
-systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
+# --- 7. Post-Install Summary / 安装后检查 ---
+echo "--------------------------------------------------------"
+echo "✅ MMDVM-Push-Notifier Installed Successfully! (v3.1.7)"
+echo "--------------------------------------------------------"
+echo "🌐 Web Admin: http://pi-star.local/admin/push_admin.php"
+echo "   (Or via IP: http://$(hostname -I | awk '{print $1}')/admin/push_admin.php)"
+echo ""
+echo "⚙️  Config File: $CONFIG_FILE"
+echo "📂 Log Path:    /var/log/pi-star/mmdvm_push.log"
+echo "--------------------------------------------------------"
+echo "💡 Usage Tip:"
+echo "   Visit the Web Admin to set your API keys and callsign."
+echo "   Then click 'Send Test' to verify."
+echo "--------------------------------------------------------"
