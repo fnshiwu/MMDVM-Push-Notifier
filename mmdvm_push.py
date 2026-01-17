@@ -492,7 +492,7 @@ class MMDVMMonitor:
             prev_idle = self._cpu_prev_idle
             if prev_total is None or prev_idle is None:
                 import time as _t
-                _t.sleep(0.2)
+                _t.sleep(0.5)
                 with open("/proc/stat", "r") as f2:
                     parts2 = f2.readline().split()
                 if not parts2 or parts2[0] != "cpu":
@@ -529,6 +529,54 @@ class MMDVMMonitor:
             if pct > 100.0:
                 pct = 100.0
             return f"{pct:.1f}"
+        except Exception:
+            return "0"
+
+    def _cpu_percent_process(self, interval: float = 0.5) -> str:
+        try:
+            import time as _t
+            pid = os.getpid()
+            with open("/proc/stat", "r") as f:
+                parts = f.readline().split()
+            if not parts or parts[0] != "cpu":
+                return "0"
+            total1 = sum(int(x) for x in parts[1:])
+            with open(f"/proc/{pid}/stat", "r") as f2:
+                p1 = f2.read().split()
+            if len(p1) < 17:
+                return "0"
+            utime1 = int(p1[13]); stime1 = int(p1[14])
+            _t.sleep(interval)
+            with open("/proc/stat", "r") as f:
+                parts = f.readline().split()
+            if not parts or parts[0] != "cpu":
+                return "0"
+            total2 = sum(int(x) for x in parts[1:])
+            with open(f"/proc/{pid}/stat", "r") as f2:
+                p2 = f2.read().split()
+            if len(p2) < 17:
+                return "0"
+            utime2 = int(p2[13]); stime2 = int(p2[14])
+            delta_proc = (utime2 + stime2) - (utime1 + stime1)
+            delta_total = total2 - total1
+            pct = 0.0 if delta_total <= 0 else (delta_proc * 100.0 / delta_total)
+            if pct < 0.0:
+                pct = 0.0
+            if pct > 100.0:
+                pct = 100.0
+            return f"{pct:.1f}"
+        except Exception:
+            return "0"
+
+    def _proc_mem_rss_kb(self) -> str:
+        try:
+            pid = os.getpid()
+            with open(f"/proc/{pid}/status", "r") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        parts = line.split()
+                        return parts[1] if len(parts) >= 2 else "0"
+            return "0"
         except Exception:
             return "0"
 
@@ -787,6 +835,10 @@ if __name__ == "__main__":
         print("Success")
     elif len(sys.argv) > 1 and sys.argv[1] == "--health":
         conf = ConfigManager.get_config()
+        mon = MMDVMMonitor()
+        ip, cpu_sys, mem_sys = mon.get_sys_info()
+        cpu_proc = mon._cpu_percent_process()
+        rss_kb = mon._proc_mem_rss_kb()
         status = {
             "version": VERSION,
             "app_log_dir": APP_LOG_DIR,
@@ -795,6 +847,11 @@ if __name__ == "__main__":
             "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
             "config_exists": os.path.exists(CONFIG_FILE),
             "config_valid": isinstance(conf, dict) and len(conf) > 0,
+            "ip": ip,
+            "cpu_system": f"{cpu_sys}%",
+            "cpu_process": f"{cpu_proc}%",
+            "mem": mem_sys,
+            "mem_rss_kb": rss_kb,
             "time": datetime.now().isoformat(timespec="seconds")
         }
         print(json.dumps(status, ensure_ascii=False))
