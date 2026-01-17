@@ -108,11 +108,16 @@ It monitors `MMDVMHost` logs and sends structured notifications for **voice and 
 
 ```
 MMDVM-Push-Notifier/
-├── mmdvm_push.py        # Core push service
-├── push_admin.php       # Web admin panel
-├── install.sh           # Installation script
-├── update.sh            # Update script
-├── mmdvm_push.service   # systemd service
+├── mmdvm_push.py        # 核心服务入口，日志轮询/推送/健康输出
+├── parser.py            # 日志解析（语音/数据、呼号、时长、时隙等）
+├── filters.py           # 过滤策略（白/黑名单、静音时段、重复抑制等）
+├── notify_fmt.py        # 推送文案格式化（中英文/i18n）
+├── push_admin.php       # Web 管理面板（含健康状态只读面板）
+├── install.sh           # 安装脚本（完整性检查、最小权限）
+├── update.sh            # 更新脚本（完整性检查、健康输出）
+├── uninstall.sh         # 卸载脚本（多路径清理、sudoers.d 规则清理）
+├── mmdvm_push.service   # systemd 服务（资源限制、自动重启）
+└── tests/               # 轻量单元测试（parser/filters/notify）
 ```
 
 ---
