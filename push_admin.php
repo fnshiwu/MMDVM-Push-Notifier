@@ -184,6 +184,9 @@ $lang = [
             <tr><td><?php echo $is_cn?'应用日志可写':'App Log Writable'; ?>:</td><td><b style="color:<?php echo ($health['app_log_writable']??false)?'#008000':'#ff0000';?>"><?php echo ($health['app_log_writable']??false)?$yes:$no; ?></b></td></tr>
             <tr><td><?php echo $is_cn?'配置文件存在':'Config Exists'; ?>:</td><td><b style="color:<?php echo ($health['config_exists']??false)?'#008000':'#ff0000';?>"><?php echo ($health['config_exists']??false)?$yes:$no; ?></b></td></tr>
             <tr><td><?php echo $is_cn?'配置有效':'Config Valid'; ?>:</td><td><b style="color:<?php echo ($health['config_valid']??false)?'#008000':'#ff0000';?>"><?php echo ($health['config_valid']??false)?$yes:$no; ?></b></td></tr>
+            <tr><td><?php echo $is_cn?'管理IP':'Admin IP'; ?>:</td><td><?php echo htmlspecialchars($health['ip']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'CPU（整机）':'CPU (System)'; ?>:</td><td><?php echo htmlspecialchars($health['cpu_system']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'内存占用':'Memory'; ?>:</td><td><?php echo htmlspecialchars($health['mem']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
             <tr><td><?php echo $is_cn?'时间':'Time'; ?>:</td><td><?php echo htmlspecialchars($health['time']??date('c'), ENT_QUOTES, 'UTF-8'); ?></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
             <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo htmlspecialchars($config['my_callsign'], ENT_QUOTES, 'UTF-8');?>" /></td></tr>
