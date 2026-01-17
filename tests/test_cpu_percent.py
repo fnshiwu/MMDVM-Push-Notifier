@@ -74,10 +74,10 @@ class TestCPUPercent(unittest.TestCase):
             raise FileNotFoundError(path)
 
         with patch.object(builtins, "open", side_effect=fake_open):
-            with patch("os.getpid", return_value=1234):
+            with patch("os.getpid", return_value=1234), patch("os.cpu_count", return_value=4):
                 mon = mp.MMDVMMonitor()
                 val = mon._cpu_percent_process(interval=0.01)
-                self.assertTrue(0.0 <= float(val) <= 100.0)
+                self.assertTrue(0.0 <= float(val) <= 400.0)
 
 
 if __name__ == "__main__":
