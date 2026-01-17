@@ -39,6 +39,46 @@ class TestCPUPercent(unittest.TestCase):
             v2 = mon._cpu_percent_proc()
             self.assertTrue(float(v2) >= 0.0)
 
+    def test_process_cpu_percent(self):
+        stat_seq = [
+            "cpu  100 0 100 800 20 0 0 0 0 0 0\n",
+            "cpu  140 0 120 880 25 0 0 0 0 0 0\n",
+        ]
+        it_stat = iter(stat_seq)
+
+        def fake_open(path, mode="r", *args, **kwargs):
+            class F:
+                def __init__(self, txt, lines=False):
+                    self._txt = txt
+                    self._lines = lines
+                def __enter__(self): return self
+                def __exit__(self, *a): pass
+                def readline(self): 
+                    try: 
+                        return next(it_stat)
+                    except StopIteration:
+                        return stat_seq[-1]
+                def read(self): return self._txt
+            if path.endswith("/proc/stat"):
+                return F("", True)
+            if path.endswith("/proc/1234/stat"):
+                if getattr(fake_open, "count", 0) == 0:
+                    fake_open.count = 1
+                    # utime=100 (index 13), stime=50 (index 14)
+                    fields = ["1234","(python)","R"] + ["0"]*10 + ["100","50"] + ["0"]*30
+                    return F(" ".join(fields))
+                else:
+                    # utime=130, stime=70
+                    fields = ["1234","(python)","R"] + ["0"]*10 + ["130","70"] + ["0"]*30
+                    return F(" ".join(fields))
+            raise FileNotFoundError(path)
+
+        with patch.object(builtins, "open", side_effect=fake_open):
+            with patch("os.getpid", return_value=1234):
+                mon = mp.MMDVMMonitor()
+                val = mon._cpu_percent_process(interval=0.01)
+                self.assertTrue(0.0 <= float(val) <= 100.0)
+
 
 if __name__ == "__main__":
     unittest.main()
