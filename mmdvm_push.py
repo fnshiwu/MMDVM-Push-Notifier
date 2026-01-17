@@ -220,6 +220,51 @@ class HamInfoManager:
             "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", 
             "Seychelles": "🇸🇨 塞舌尔"
         }
+        self.geo_map_en = {
+            "China": "🇨🇳 China", "Hong Kong": "🇭🇰 Hong Kong", "Macao": "🇲🇴 Macao",
+            "Taiwan": "🇹🇼 Taiwan", "Japan": "🇯🇵 Japan", "Korea": "🇰🇷 Korea",
+            "South Korea": "🇰🇷 South Korea", "North Korea": "🇰🇵 North Korea", "Thailand": "🇹🇭 Thailand",
+            "Singapore": "🇸🇬 Singapore", "Malaysia": "🇲🇾 Malaysia", "Indonesia": "🇮🇩 Indonesia",
+            "Philippines": "🇵🇭 Philippines", "Vietnam": "🇻🇳 Vietnam", "India": "🇮🇳 India",
+            "Pakistan": "🇵🇰 Pakistan", "Sri Lanka": "🇱🇰 Sri Lanka", "Bangladesh": "🇧🇩 Bangladesh",
+            "Nepal": "🇳🇵 Nepal", "Mongolia": "🇲🇳 Mongolia",
+            "United Arab Emirates": "🇦🇪 United Arab Emirates", "UAE": "🇦🇪 United Arab Emirates", "Saudi Arabia": "🇸🇦 Saudi Arabia",
+            "Israel": "🇮🇱 Israel", "Turkey": "🇹🇷 Turkey", "Iran": "🇮🇷 Iran",
+            "Iraq": "🇮🇶 Iraq", "Kuwait": "🇰🇼 Kuwait", "Oman": "🇴🇲 Oman",
+            "Qatar": "🇶🇦 Qatar", "Jordan": "🇯🇴 Jordan", "Lebanon": "🇱🇧 Lebanon",
+            "Kazakhstan": "🇰🇿 Kazakhstan", "Uzbekistan": "🇺🇿 Uzbekistan",
+            "United Kingdom": "🇬🇧 United Kingdom", "UK": "🇬🇧 United Kingdom", "Germany": "🇩🇪 Germany",
+            "France": "🇫🇷 France", "Italy": "🇮🇹 Italy", "Spain": "🇪🇸 Spain",
+            "Portugal": "🇵🇹 Portugal", "Russia": "🇷🇺 Russia", "Russian Federation": "🇷🇺 Russia",
+            "Netherlands": "🇳🇱 Netherlands", "Belgium": "🇧🇪 Belgium", "Switzerland": "🇨🇭 Switzerland",
+            "Austria": "🇦🇹 Austria",
+            "Sweden": "🇸🇪 Sweden", "Norway": "🇳🇴 Norway",
+            "Denmark": "🇩🇰 Denmark",
+            "Finland": "🇫🇮 Finland", "Poland": "🇵🇱 Poland",
+            "Czech Republic": "🇨🇿 Czech Republic", "Czechia": "🇨🇿 Czech Republic", "Hungary": "🇭🇺 Hungary",
+            "Greece": "🇬🇷 Greece", "Ireland": "🇮🇪 Ireland", "Romania": "🇷🇴 Romania",
+            "Bulgaria": "🇧🇬 Bulgaria", "Ukraine": "🇺🇦 Ukraine", "Belarus": "🇧🇾 Belarus",
+            "Slovakia": "🇸🇰 Slovakia", "Croatia": "🇭🇷 Croatia", "Serbia": "🇷🇸 Serbia",
+            "Slovenia": "🇸🇮 Slovenia", "Estonia": "🇪🇪 Estonia", "Latvia": "🇱🇻 Latvia",
+            "Lithuania": "🇱🇹 Lithuania", "Iceland": "🇮🇸 Iceland", "Luxembourg": "🇱🇺 Luxembourg",
+            "Monaco": "🇲🇨 Monaco", "Cyprus": "🇨🇾 Cyprus", "Malta": "🇲🇹 Malta",
+            "United States": "🇺🇸 United States", "USA": "🇺🇸 United States", "Canada": "🇨🇦 Canada",
+            "Mexico": "🇲🇽 Mexico", "Cuba": "🇨🇺 Cuba", "Jamaica": "🇯🇲 Jamaica",
+            "Puerto Rico": "🇵🇷 Puerto Rico", "Dominican Republic": "🇩🇴 Dominican Republic",
+            "Costa Rica": "🇨🇷 Costa Rica", "Panama": "🇵🇦 Panama", "Guatemala": "🇬🇹 Guatemala",
+            "Honduras": "🇭🇳 Honduras", "Brazil": "🇧🇷 Brazil", "Argentina": "🇦🇷 Argentina",
+            "Chile": "🇨🇱 Chile", "Colombia": "🇨🇴 Colombia", "Peru": "🇵🇪 Peru",
+            "Venezuela": "🇻🇪 Venezuela", "Uruguay": "🇺🇾 Uruguay", "Paraguay": "🇵🇾 Paraguay",
+            "Ecuador": "🇪🇨 Ecuador", "Bolivia": "🇧🇴 Bolivia",
+            "Australia": "🇦🇺 Australia", "New Zealand": "🇳🇿 New Zealand", "Fiji": "🇫🇯 Fiji",
+            "Papua New Guinea": "🇵🇬 Papua New Guinea",
+            "South Africa": "🇿🇦 South Africa", "Egypt": "🇪🇬 Egypt", "Nigeria": "🇳🇬 Nigeria",
+            "Kenya": "🇰🇪 Kenya",
+            "Morocco": "🇲🇦 Morocco",
+            "Algeria": "🇩🇿 Algeria", "Ethiopia": "🇪🇹 Ethiopia", "Ghana": "🇬🇭 Ghana",
+            "Tanzania": "🇹🇿 Tanzania", "Uganda": "🇺🇬 Uganda", "Mauritius": "🇲🇺 Mauritius",
+            "Seychelles": "🇸🇨 Seychelles"
+        }
 
     def get_info(self, callsign: str) -> Dict[str, str]:
         """获取呼号信息，带手动缓存管理"""
@@ -282,20 +327,24 @@ class HamInfoManager:
                     state = parts[5].strip().upper() if len(parts) > 5 else ""
                     country = parts[6].strip() if len(parts) > 6 else ""
                     
-                    # 国家名称映射
+                    country_cn = country
+                    country_en = country
                     if any('\u4e00' <= char <= '\u9fff' for char in country):
                         for k, v in self.geo_map.items():
-                            if k in country or (len(v.split()) > 1 and v.split()[1] in country):
-                                country = v
+                            if country == v:
+                                country_cn = v
+                                country_en = self.geo_map_en.get(k, k)
                                 break
                     else:
-                        country = self.geo_map.get(country, country)
+                        country_cn = self.geo_map.get(country, country)
+                        country_en = self.geo_map_en.get(country, country)
                     
                     full_name = f"{first_name} {last_name}".strip().upper()
                     name_part = f" ({full_name})" if full_name else ""
-                    loc = f"{city}, {state} ({country})" if city or state else country
+                    loc_en = f"{city}, {state} ({country_en})" if city or state else country_en
+                    loc_cn = f"{city}, {state} ({country_cn})" if city or state else country_cn
                     
-                    return {"name": name_part, "loc": loc}
+                    return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
                     
         except (OSError, ValueError) as e:
             logger.debug(f"Error fetching info for {callsign}: {e}")
