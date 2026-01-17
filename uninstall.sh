@@ -28,8 +28,8 @@ sudo systemctl daemon-reload
 # 3. Remove files
 echo "3. Removing files..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
-WEB_LINK="/var/www/dashboard/admin/push_admin.php"
-WEB_LINK_2="/var/www/dashboard/push_admin.php"
+WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
+DASH_LINK="/var/www/dashboard/push_admin.php"
 CONFIG_FILE="/etc/mmdvm_push.json"
 
 if [ -d "$INSTALL_DIR" ]; then
@@ -37,14 +37,15 @@ if [ -d "$INSTALL_DIR" ]; then
     echo "   - Removed $INSTALL_DIR"
 fi
 
-if [ -L "$WEB_LINK" ] || [ -f "$WEB_LINK" ]; then
-    sudo rm -f "$WEB_LINK"
-    echo "   - Removed $WEB_LINK"
-fi
-
-if [ -L "$WEB_LINK_2" ] || [ -f "$WEB_LINK_2" ]; then
-    sudo rm -f "$WEB_LINK_2"
-    echo "   - Removed $WEB_LINK_2"
+for D in $WEB_DIRS; do
+    if [ -L "$D/push_admin.php" ] || [ -f "$D/push_admin.php" ]; then
+        sudo rm -f "$D/push_admin.php"
+        echo "   - Removed $D/push_admin.php"
+    fi
+done
+if [ -L "$DASH_LINK" ] || [ -f "$DASH_LINK" ]; then
+    sudo rm -f "$DASH_LINK"
+    echo "   - Removed $DASH_LINK"
 fi
 
 # 4. Remove config (Optional)
@@ -58,13 +59,22 @@ else
     echo "   - Configuration file kept at $CONFIG_FILE"
 fi
 
-# 5. Clean up sudoers (Optional but good)
-# Removing the specific line for update.sh if it exists
-SUDO_FILE="/etc/sudoers"
-# It's risky to edit sudoers with sed script, maybe just leave it or warn.
-# The install script added: echo "www-data ALL=(ALL) NOPASSWD: $UPDATE_SCRIPT"
-# We can try to remove it safely if we are sure.
-# For safety, I will skip editing sudoers automatically to avoid breaking the system.
-echo "Note: The sudoers entry for update.sh was left untouched for safety."
+SUDO_D="/etc/sudoers.d/mmdvm-push-web"
+if [ -f "$SUDO_D" ]; then
+    sudo rm -f "$SUDO_D"
+    echo "   - Removed $SUDO_D"
+fi
+
+read -p "Remove service user mmdvm-push? (y/n) / 删除服务用户 mmdvm-push？(y/n): " del_user
+if [[ $del_user == [yY] || $del_user == [yY][eE][sS] ]]; then
+    id -u mmdvm-push >/dev/null 2>&1 && sudo userdel -r mmdvm-push
+    echo "   - Removed user mmdvm-push"
+fi
+
+LOG_FILE="/var/log/pi-star/mmdvm_push.log"
+if [ -f "$LOG_FILE" ]; then
+    sudo rm -f "$LOG_FILE"
+    echo "   - Removed $LOG_FILE"
+fi
 
 echo "--- Uninstall Complete / 卸载完成 ---"
