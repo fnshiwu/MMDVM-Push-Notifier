@@ -105,11 +105,11 @@ class ConfigManager:
                         raw = json.load(f)
                     cls._config = cls._validate_config(raw)
                     cls._last_mtime = mtime
-                    logger.debug("Config reloaded")
+                    (logger or logging.getLogger(__name__)).debug("Config reloaded")
             except json.JSONDecodeError as e:
-                logger.error(f"Config JSON parse error: {e}")
+                (logger or logging.getLogger(__name__)).error(f"Config JSON parse error: {e}")
             except OSError as e:
-                logger.error(f"Config file read error: {e}")
+                (logger or logging.getLogger(__name__)).error(f"Config file read error: {e}")
         
         return cls._config
 
@@ -153,7 +153,7 @@ class ConfigManager:
                 "end": qm.get("end", "07:00")
             }
         except Exception as e:
-            logger.warning(f"Config sanitize error: {e}")
+            (logger or logging.getLogger(__name__)).warning(f"Config sanitize error: {e}")
         return conf
 
 
@@ -834,16 +834,11 @@ class MMDVMMonitor:
 # Entry
 # =========================
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--version":
-        print(VERSION)
-        sys.exit(0)
-    
     if len(sys.argv) > 1 and sys.argv[1] == "--test":
         setup_logging()
         monitor = MMDVMMonitor()
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
-        cpu_proc = monitor._cpu_percent_process_top()
         temp_str, _ = monitor.get_current_temp(conf)
         lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
         if lang == 'en':
@@ -852,7 +847,6 @@ if __name__ == "__main__":
                 f"🌐 <b>IP</b>: {ip}\n"
                 f"🌡️ <b>Temp</b>: {temp_str}\n"
                 f"📊 <b>CPU (System)</b>: {cpu}%\n"
-                f"🧩 <b>CPU (Process)</b>: {cpu_proc}%\n"
                 f"💾 <b>Memory</b>: {mem}\n"
                 f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
             )
@@ -863,7 +857,6 @@ if __name__ == "__main__":
                 f"🌐 <b>IP</b>: {ip}\n"
                 f"🌡️ <b>温度</b>: {temp_str}\n"
                 f"📊 <b>CPU（整机）</b>: {cpu}%\n"
-                f"🧩 <b>CPU（推送进程）</b>: {cpu_proc}%\n"
                 f"💾 <b>内存</b>: {mem}\n"
                 f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}"
             )
