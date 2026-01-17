@@ -532,6 +532,31 @@ class MMDVMMonitor:
         except Exception:
             return "0"
 
+    def _cpu_percent_top(self) -> str:
+        try:
+            out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
+            if not out:
+                return self._cpu_percent_proc()
+            # Example: "%Cpu(s):  2.3 us,  4.6 sy,  0.0 ni, 93.1 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st"
+            import re
+            m = re.search(r'(\d+(?:\.\d+)?)\s*id', out)
+            if m:
+                idle = float(m.group(1))
+                busy = max(0.0, min(100.0, 100.0 - idle))
+                return f"{busy:.1f}"
+            # Fallback: sum known components if id not found
+            comps = {}
+            for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
+                m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
+                if m2:
+                    comps[key] = float(m2.group(1))
+            if comps:
+                busy = sum(comps.values())
+                return f"{busy:.1f}"
+            return self._cpu_percent_proc()
+        except Exception:
+            return self._cpu_percent_proc()
+
     def _cpu_percent_process(self, interval: float = 1.0) -> str:
         try:
             import time as _t
@@ -570,6 +595,18 @@ class MMDVMMonitor:
         except Exception:
             return "0"
 
+    def _cpu_percent_process_top(self) -> str:
+        try:
+            pid = os.getpid()
+            val = subprocess.getoutput(f"ps -p {pid} -o %cpu --no-headers").strip()
+            if not val:
+                return self._cpu_percent_process(interval=1.0)
+            # ps already returns normalized percentage compatible with top
+            f = float(val)
+            return f"{f:.1f}"
+        except Exception:
+            return self._cpu_percent_process(interval=1.0)
+
     def _proc_mem_rss_kb(self) -> str:
         try:
             pid = os.getpid()
@@ -602,13 +639,7 @@ class MMDVMMonitor:
             ip = subprocess.getoutput("hostname -I").split()[0]
         except (IndexError, Exception):
             ip = "Unknown"
-        try:
-            cpu = self._cpu_percent_proc()
-        except Exception:
-            try:
-                cpu = subprocess.getoutput("top -bn1 | grep 'Cpu(s)' | awk '{print $2+$4}'").strip()
-            except Exception:
-                cpu = "0"
+        cpu = self._cpu_percent_top()
         try:
             mem = self._mem_percent_proc()
         except Exception:
@@ -812,7 +843,7 @@ if __name__ == "__main__":
         monitor = MMDVMMonitor()
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
-        cpu_proc = monitor._cpu_percent_process()
+        cpu_proc = monitor._cpu_percent_process_top()
         temp_str, _ = monitor.get_current_temp(conf)
         lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
         if lang == 'en':
@@ -842,7 +873,7 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         mon = MMDVMMonitor()
         ip, cpu_sys, mem_sys = mon.get_sys_info()
-        cpu_proc = mon._cpu_percent_process(interval=1.0)
+        cpu_proc = mon._cpu_percent_process_top()
         rss_kb = mon._proc_mem_rss_kb()
         status = {
             "version": VERSION,
