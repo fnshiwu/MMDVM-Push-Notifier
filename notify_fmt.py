@@ -8,11 +8,13 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     loss = event['loss']
     ber = event['ber']
     slot = event['slot']
+    loc_en = info.get('loc_en', info.get('loc', ''))
+    loc_cn = info.get('loc_cn', info.get('loc', ''))
     if lang == 'en':
         body = (
             f"👤 <b>Callsign</b>: {call}{info.get('name','')}\n"
             f"👥 <b>Talkgroup</b>: {target}\n"
-            f"📍 <b>Location</b>: {info.get('loc','')}\n"
+            f"📍 <b>Location</b>: {loc_en}\n"
             f"📅 <b>Date</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
             f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}\n"
             f"⏳ <b>Duration</b>: {dur}s\n"
@@ -25,7 +27,7 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
         body = (
             f"👤 <b>呼号</b>: {call}{info.get('name','')}\n"
             f"👥 <b>群组</b>: {target}\n"
-            f"📍 <b>地区</b>: {info.get('loc','')}\n"
+            f"📍 <b>地区</b>: {loc_cn}\n"
             f"📅 <b>日期</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
             f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}\n"
             f"⏳ <b>时长</b>: {dur}秒\n"
