@@ -639,7 +639,10 @@ class MMDVMMonitor:
             ip = subprocess.getoutput("hostname -I").split()[0]
         except (IndexError, Exception):
             ip = "Unknown"
-        cpu = self._cpu_percent_top()
+        try:
+            cpu = self._cpu_percent_proc()
+        except Exception:
+            cpu = "0"
         try:
             mem = self._mem_percent_proc()
         except Exception:
@@ -866,7 +869,7 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         mon = MMDVMMonitor()
         ip, cpu_sys, mem_sys = mon.get_sys_info()
-        cpu_proc = mon._cpu_percent_process_top()
+        cpu_proc = mon._cpu_percent_process(interval=1.0)
         rss_kb = mon._proc_mem_rss_kb()
         status = {
             "version": VERSION,
