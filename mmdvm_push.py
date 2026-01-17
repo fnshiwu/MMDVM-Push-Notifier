@@ -490,13 +490,44 @@ class MMDVMMonitor:
             total = idleall + nonidle
             prev_total = self._cpu_prev_total
             prev_idle = self._cpu_prev_idle
+            if prev_total is None or prev_idle is None:
+                import time as _t
+                _t.sleep(0.2)
+                with open("/proc/stat", "r") as f2:
+                    parts2 = f2.readline().split()
+                if not parts2 or parts2[0] != "cpu":
+                    return "0"
+                nums2 = [int(x) for x in parts2[1:]]
+                user2 = nums2[0] if len(nums2) > 0 else 0
+                nice2 = nums2[1] if len(nums2) > 1 else 0
+                system2 = nums2[2] if len(nums2) > 2 else 0
+                idle2 = nums2[3] if len(nums2) > 3 else 0
+                iowait2 = nums2[4] if len(nums2) > 4 else 0
+                irq2 = nums2[5] if len(nums2) > 5 else 0
+                softirq2 = nums2[6] if len(nums2) > 6 else 0
+                steal2 = nums2[7] if len(nums2) > 7 else 0
+                idleall2 = idle2 + iowait2
+                nonidle2 = user2 + nice2 + system2 + irq2 + softirq2 + steal2
+                total2 = idleall2 + nonidle2
+                totald_i = total2 - total
+                idled_i = idleall2 - idleall
+                self._cpu_prev_total = total2
+                self._cpu_prev_idle = idleall2
+                pct_i = 0.0 if totald_i <= 0 else (totald_i - idled_i) * 100.0 / totald_i
+                if pct_i < 0.0:
+                    pct_i = 0.0
+                if pct_i > 100.0:
+                    pct_i = 100.0
+                return f"{pct_i:.1f}"
             self._cpu_prev_total = total
             self._cpu_prev_idle = idleall
-            if prev_total is None or prev_idle is None:
-                return "0"
             totald = total - prev_total
             idled = idleall - prev_idle
             pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
+            if pct < 0.0:
+                pct = 0.0
+            if pct > 100.0:
+                pct = 100.0
             return f"{pct:.1f}"
         except Exception:
             return "0"
