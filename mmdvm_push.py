@@ -485,8 +485,9 @@ class MMDVMMonitor:
             irq = nums[5] if len(nums) > 5 else 0
             softirq = nums[6] if len(nums) > 6 else 0
             steal = nums[7] if len(nums) > 7 else 0
-            idleall = idle + iowait
-            nonidle = user + nice + system + irq + softirq + steal
+            # 计算口径对齐 top：将 iowait 计入非空闲
+            idleall = idle
+            nonidle = user + nice + system + irq + softirq + steal + iowait
             total = idleall + nonidle
             prev_total = self._cpu_prev_total
             prev_idle = self._cpu_prev_idle
@@ -559,11 +560,13 @@ class MMDVMMonitor:
             utime2 = int(p2[13]); stime2 = int(p2[14])
             delta_proc = (utime2 + stime2) - (utime1 + stime1)
             delta_total = total2 - total1
-            pct = 0.0 if delta_total <= 0 else (delta_proc * 100.0 / delta_total)
+            cpus = os.cpu_count() or 1
+            pct = 0.0 if delta_total <= 0 else (delta_proc * 100.0 / delta_total) * cpus
             if pct < 0.0:
                 pct = 0.0
-            if pct > 100.0:
-                pct = 100.0
+            max_pct = 100.0 * cpus
+            if pct > max_pct:
+                pct = max_pct
             return f"{pct:.1f}"
         except Exception:
             return "0"
