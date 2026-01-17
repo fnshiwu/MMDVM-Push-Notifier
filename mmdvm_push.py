@@ -22,6 +22,9 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from threading import Semaphore, Lock
 from typing import Dict, List, Optional, Tuple, Any
+from parser import parse_line
+from filters import quiet_time, should_push
+from notify_fmt import format_message
 
 # =========================
 # Global Constants
@@ -464,30 +467,8 @@ class MMDVMMonitor:
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
+        self.last_activity_ts: float = 0.0
         
-        # 更健壮的正则表达式
-        self.re_master = re.compile(
-            r'end of (?P<v_type>(?:voice\s*|data\s*)?)transmission from '
-            r'(?P<call>[A-Z0-9/\-]+) to (?P<target>[A-Z0-9/\-\s]+?), '
-            r'(?P<dur>\d+\.?\d*) seconds'
-            r'(?:, (?P<loss>\d+)% packet loss)?'
-            r'(?:, BER: (?P<ber>\d+\.?\d*)%)?',
-            re.IGNORECASE
-        )
-
-    def is_quiet_time(self, conf: Dict) -> bool:
-        quiet_config = conf.get('quiet_mode', {})
-        if not quiet_config.get('enabled'):
-            return False
-        
-        now = datetime.now().strftime("%H:%M")
-        start = quiet_config.get('start', '23:00')
-        end = quiet_config.get('end', '07:00')
-        
-        if start <= end:
-            return start <= now <= end
-        else:
-            return now >= start or now <= end
 
     def _cpu_percent_proc(self) -> str:
         try:
@@ -706,7 +687,8 @@ class MMDVMMonitor:
                     
                     line = f.readline()
                     if not line:
-                        time.sleep(LOG_POLL_INTERVAL)
+                        interval = 0.2 if (time.time() - self.last_activity_ts) < 60 else 0.8
+                        time.sleep(interval)
                         continue
                     
                     self.process_line(line)
@@ -717,87 +699,23 @@ class MMDVMMonitor:
             logger.error(f"无权限读取日志: {log_file}")
 
     def process_line(self, line: str):
-        if "end of" not in line.lower():
+        event = parse_line(line)
+        if not event:
             return
-        
-        match = self.re_master.search(line)
-        if not match:
-            return
-        
         conf = ConfigManager.get_config()
         self.check_temp_alert(conf)
-        
-        call = match.group('call').upper()
-        try:
-            dur = float(match.group('dur'))
-        except ValueError:
+        if quiet_time(conf):
             return
-        
-        if self.is_quiet_time(conf):
+        if not should_push(conf, event, self.last_msg):
             return
-        
-        # 过滤逻辑
-        focus = ConfigManager.parse_list(conf.get('focus_list', []))
-        ignore = ConfigManager.parse_list(conf.get('ignore_list', []))
-        my_callsign = conf.get('my_callsign', '').upper()
-        min_duration = float(conf.get('min_duration', 1.0))
-        
-        if focus and call not in focus:
-            return
-        if call == my_callsign or call in ignore or dur < min_duration:
-            return
-
-        # 防抖：同一呼号 3 秒内不重复推送
         curr_ts = time.time()
-        if call == self.last_msg["call"] and (curr_ts - self.last_msg["ts"]) < 3:
-            return
-        self.last_msg.update({"call": call, "ts": curr_ts})
-        
-        # 构建推送内容
-        info = self.ham_manager.get_info(call)
+        self.last_msg.update({"call": event['call'], "ts": curr_ts})
+        info = self.ham_manager.get_info(event['call'])
         temp_str, _ = self.get_current_temp(conf)
-        
-        v_type = match.group('v_type') or ''
-        is_voice = 'data' not in v_type.lower()
-        
-        slot = ""
-        if "Slot 1" in line:
-            slot = " (Slot 1)"
-        elif "Slot 2" in line:
-            slot = " (Slot 2)"
-
-        target = match.group('target').strip()
-        loss = match.group('loss') or '0'
-        ber = match.group('ber') or '0.0'
-        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
-        if lang == 'en':
-            body = (
-                f"👤 <b>Callsign</b>: {call}{info['name']}\n"
-                f"👥 <b>Talkgroup</b>: {target}\n"
-                f"📍 <b>Location</b>: {info['loc']}\n"
-                f"📅 <b>Date</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
-                f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"⏳ <b>Duration</b>: {dur}s\n"
-                f"📦 <b>Loss</b>: {loss}%\n"
-                f"📉 <b>BER</b>: {ber}%\n"
-                f"🌡️ <b>Temp</b>: {temp_str}"
-            )
-            type_label = f"{'🎙️ Voice QSO' if is_voice else '💾 Data Mode'}{slot}"
-        else:
-            body = (
-                f"👤 <b>呼号</b>: {call}{info['name']}\n"
-                f"👥 <b>群组</b>: {target}\n"
-                f"📍 <b>地区</b>: {info['loc']}\n"
-                f"📅 <b>日期</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
-                f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}\n"
-                f"⏳ <b>时长</b>: {dur}秒\n"
-                f"📦 <b>丢失</b>: {loss}%\n"
-                f"📉 <b>误码</b>: {ber}%\n"
-                f"🌡️ <b>温度</b>: {temp_str}"
-            )
-            type_label = f"{'🎙️ 语音通联' if is_voice else '💾 数据模式'}{slot}"
-        PushService.send(conf, type_label, body, is_voice=is_voice)
-        logger.info(f"推送完成: {call} -> {target}")
+        type_label, body = format_message(conf, event, temp_str, info)
+        self.last_activity_ts = time.time()
+        PushService.send(conf, type_label, body, is_voice=event['is_voice'])
+        logger.info(f"推送完成: {event['call']} -> {event['target']}")
 
 
 # =========================
