@@ -98,6 +98,22 @@ function format_list_for_web($data) {
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
 $is_running = (strpos(shell_exec("sudo /bin/systemctl status $serviceName --no-pager"), 'active (running)') !== false);
+$healthRaw = @shell_exec("python3 $scriptPath --health");
+$health = json_decode($healthRaw, true);
+if (!is_array($health)) {
+    $health = [
+        "version" => $version,
+        "app_log_dir" => "",
+        "app_log_writable" => false,
+        "mmdvm_log_dir" => "/var/log/pi-star/",
+        "mmdvm_log_exists" => false,
+        "config_exists" => file_exists($configFile),
+        "config_valid" => is_array($config) && count($config) > 0,
+        "time" => date('c')
+    ];
+}
+$yes = $is_cn ? '是' : 'Yes';
+$no = $is_cn ? '否' : 'No';
 
 $lang = [
     'cn' => [
@@ -160,6 +176,15 @@ $lang = [
                 <button type="submit" name="action" value="stop"><?php echo $lang['btn_stop']; ?></button>
                 <button type="submit" name="action" value="restart"><?php echo $lang['btn_res']; ?></button>
             </td></tr>
+            <thead><tr><th colspan="2"><?php echo $is_cn?'健康状态':'Health Status'; ?></th></tr></thead>
+            <tr><td><?php echo $is_cn?'版本':'Version'; ?>:</td><td><?php echo htmlspecialchars($health['version']??$version, ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'MMDVM 日志目录':'MMDVM Log Dir'; ?>:</td><td><?php echo htmlspecialchars($health['mmdvm_log_dir']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'日志目录存在':'Log Dir Exists'; ?>:</td><td><b style="color:<?php echo ($health['mmdvm_log_exists']??false)?'#008000':'#ff0000';?>"><?php echo ($health['mmdvm_log_exists']??false)?$yes:$no; ?></b></td></tr>
+            <tr><td><?php echo $is_cn?'应用日志目录':'App Log Dir'; ?>:</td><td><?php echo htmlspecialchars($health['app_log_dir']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'应用日志可写':'App Log Writable'; ?>:</td><td><b style="color:<?php echo ($health['app_log_writable']??false)?'#008000':'#ff0000';?>"><?php echo ($health['app_log_writable']??false)?$yes:$no; ?></b></td></tr>
+            <tr><td><?php echo $is_cn?'配置文件存在':'Config Exists'; ?>:</td><td><b style="color:<?php echo ($health['config_exists']??false)?'#008000':'#ff0000';?>"><?php echo ($health['config_exists']??false)?$yes:$no; ?></b></td></tr>
+            <tr><td><?php echo $is_cn?'配置有效':'Config Valid'; ?>:</td><td><b style="color:<?php echo ($health['config_valid']??false)?'#008000':'#ff0000';?>"><?php echo ($health['config_valid']??false)?$yes:$no; ?></b></td></tr>
+            <tr><td><?php echo $is_cn?'时间':'Time'; ?>:</td><td><?php echo htmlspecialchars($health['time']??date('c'), ENT_QUOTES, 'UTF-8'); ?></td></tr>
             <thead><tr><th colspan="2"><?php echo $lang['conf']; ?></th></tr></thead>
             <tr><td><?php echo $lang['my_call']; ?>:</td><td><input type="text" name="callsign" value="<?php echo htmlspecialchars($config['my_callsign'], ENT_QUOTES, 'UTF-8');?>" /></td></tr>
             <tr><td><?php echo $lang['min_dur']; ?>:</td><td><input type="number" step="0.1" name="min_duration" class="num-box" value="<?php echo htmlspecialchars((string)$config['min_duration'], ENT_QUOTES, 'UTF-8');?>" /></td></tr>
