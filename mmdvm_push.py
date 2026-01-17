@@ -485,7 +485,6 @@ class MMDVMMonitor:
             irq = nums[5] if len(nums) > 5 else 0
             softirq = nums[6] if len(nums) > 6 else 0
             steal = nums[7] if len(nums) > 7 else 0
-            # 计算口径对齐 top：将 iowait 计入非空闲
             idleall = idle
             nonidle = user + nice + system + irq + softirq + steal + iowait
             total = idleall + nonidle
@@ -507,8 +506,8 @@ class MMDVMMonitor:
                 irq2 = nums2[5] if len(nums2) > 5 else 0
                 softirq2 = nums2[6] if len(nums2) > 6 else 0
                 steal2 = nums2[7] if len(nums2) > 7 else 0
-                idleall2 = idle2 + iowait2
-                nonidle2 = user2 + nice2 + system2 + irq2 + softirq2 + steal2
+                idleall2 = idle2
+                nonidle2 = user2 + nice2 + system2 + irq2 + softirq2 + steal2 + iowait2
                 total2 = idleall2 + nonidle2
                 totald_i = total2 - total
                 idled_i = idleall2 - idleall
