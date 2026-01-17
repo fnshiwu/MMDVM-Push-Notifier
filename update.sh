@@ -22,6 +22,17 @@ echo "正在拉取远程仓库最新代码..."
 sudo git fetch --all
 sudo git reset --hard origin/main
 
+# 核心文件完整性检查
+REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py mmdvm_push.service"
+MISSING=""
+for f in $REQ_FILES; do
+    [ -f "$f" ] || MISSING="$MISSING $f"
+done
+if [ -n "$MISSING" ]; then
+    echo "错误: 缺少必要文件:$MISSING"
+    exit 1
+fi
+
 # 3.5 确保服务用户存在并修复目录所有权
 id -u mmdvm-push >/dev/null 2>&1 || sudo useradd -r -s /usr/sbin/nologin -U mmdvm-push
 sudo chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
@@ -30,6 +41,7 @@ sudo chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
 if [ -f "mmdvm_push.service" ]; then
     echo "正在同步服务配置文件..."
     sudo cp mmdvm_push.service /etc/systemd/system/
+    sudo chmod 644 /etc/systemd/system/mmdvm_push.service
     
     # 针对 16MB 安全缓冲区不足的专项修复
     echo "正在清理并优化系统内存盘空间..."
@@ -67,6 +79,7 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
 EOF
 chmod 440 "$SUDO_D"
+visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 fi
 
 # 重新部署 Web 管理页面链接（多路径兼容）
@@ -93,3 +106,9 @@ fi
 
 # 显示服务状态（只显示前几行，避免刷屏）
 sudo systemctl status mmdvm_push.service --no-pager | grep -E "Active:|Main PID:"
+
+# 输出健康状态
+HEALTH=$(python3 $INSTALL_DIR/mmdvm_push.py --health 2>/dev/null)
+if [ -n "$HEALTH" ]; then
+    echo "健康状态: $HEALTH"
+fi
