@@ -492,7 +492,7 @@ class MMDVMMonitor:
             prev_idle = self._cpu_prev_idle
             if prev_total is None or prev_idle is None:
                 import time as _t
-                _t.sleep(0.5)
+                _t.sleep(1.0)
                 with open("/proc/stat", "r") as f2:
                     parts2 = f2.readline().split()
                 if not parts2 or parts2[0] != "cpu":
@@ -810,6 +810,7 @@ if __name__ == "__main__":
         monitor = MMDVMMonitor()
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
+        cpu_proc = monitor._cpu_percent_process()
         temp_str, _ = monitor.get_current_temp(conf)
         lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
         if lang == 'en':
@@ -817,7 +818,8 @@ if __name__ == "__main__":
                 f"Channel test success ({VERSION})\n"
                 f"🌐 <b>IP</b>: {ip}\n"
                 f"🌡️ <b>Temp</b>: {temp_str}\n"
-                f"📊 <b>CPU</b>: {cpu}%\n"
+                f"📊 <b>CPU (System)</b>: {cpu}%\n"
+                f"🧩 <b>CPU (Process)</b>: {cpu_proc}%\n"
                 f"💾 <b>Memory</b>: {mem}\n"
                 f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
             )
@@ -827,7 +829,8 @@ if __name__ == "__main__":
                 f"通道测试成功 ({VERSION})\n"
                 f"🌐 <b>IP</b>: {ip}\n"
                 f"🌡️ <b>温度</b>: {temp_str}\n"
-                f"📊 <b>CPU</b>: {cpu}%\n"
+                f"📊 <b>CPU（整机）</b>: {cpu}%\n"
+                f"🧩 <b>CPU（推送进程）</b>: {cpu_proc}%\n"
                 f"💾 <b>内存</b>: {mem}\n"
                 f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}"
             )
