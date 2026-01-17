@@ -532,7 +532,7 @@ class MMDVMMonitor:
         except Exception:
             return "0"
 
-    def _cpu_percent_process(self, interval: float = 0.5) -> str:
+    def _cpu_percent_process(self, interval: float = 1.0) -> str:
         try:
             import time as _t
             pid = os.getpid()
@@ -840,7 +840,7 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         mon = MMDVMMonitor()
         ip, cpu_sys, mem_sys = mon.get_sys_info()
-        cpu_proc = mon._cpu_percent_process()
+        cpu_proc = mon._cpu_percent_process(interval=1.0)
         rss_kb = mon._proc_mem_rss_kb()
         status = {
             "version": VERSION,
