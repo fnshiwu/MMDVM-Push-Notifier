@@ -15,9 +15,11 @@ class TestNotifyFmt(unittest.TestCase):
             'slot': ' Slot 1',
             'is_voice': True
         }
-        t, b = format_message(conf, event, '25.0°C', {'name': '', 'loc': 'China'})
+        t, b = format_message(conf, event, '25.0°C', {'name': '', 'loc_en': 'China', 'loc_cn': '中国'})
         self.assertIn('Voice QSO', t)
         self.assertIn('Callsign', b)
+        self.assertIn('Location', b)
+        self.assertIn('China', b)
         self.assertIn('Temp', b)
         self.assertIn('TG9999', b)
 
@@ -32,13 +34,14 @@ class TestNotifyFmt(unittest.TestCase):
             'slot': ' Slot 2',
             'is_voice': False
         }
-        t, b = format_message(conf, event, '25.0°C', {'name': '', 'loc': '江苏'})
+        t, b = format_message(conf, event, '25.0°C', {'name': '', 'loc_cn': '中国', 'loc_en': 'China'})
         self.assertIn('数据模式', t)
         self.assertIn('呼号', b)
+        self.assertIn('地区', b)
+        self.assertIn('中国', b)
         self.assertIn('温度', b)
         self.assertIn('TG9999', b)
 
 
 if __name__ == '__main__':
     unittest.main()
-
