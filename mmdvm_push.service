@@ -9,18 +9,18 @@ User=mmdvm-push
 Group=mmdvm-push
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
 
-# 冷启动缓冲
+# Cold-start delay | 冷启动缓冲
 ExecStartPre=/bin/sleep 20
 
-# 核心 Python 服务，加入 -u 保证日志实时输出
+# Core Python service with -u for unbuffered logs | 核心 Python 服务（-u 保证日志即时）
 ExecStart=/usr/bin/python3 -u /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
 
-# 自动重启，防止偶发错误中断
+# Auto-restart to recover from transient errors | 自动重启防止偶发错误
 Restart=always
 RestartSec=10
 StartLimitInterval=0
 
-# 资源限制，保护系统
+# Resource limits to protect system | 资源限制以保护系统
 NoNewPrivileges=true
 CPUQuota=30%
 MemoryMax=150M
