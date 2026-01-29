@@ -5,14 +5,14 @@ $serviceName = 'mmdvm_push.service';
 $scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
 $updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
 
-// --- 获取实时版本号 ---
+// Version retrieval | 获取实时版本号
 $version = trim(@shell_exec("python3 $scriptPath --version"));
 if (empty($version)) { $version = 'v3.1.7'; }
 
-// 磁盘读写控制
+// Disk read/write control | 磁盘读写控制
 function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$mode / 2>/dev/null"); }
 
-// 初始化配置文件逻辑
+// Initialize configuration file | 初始化配置文件
 if (!file_exists($configFile)) {
     set_disk('rw');
     file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn","ignore_list"=>"","focus_list"=>""], 192));
@@ -24,7 +24,7 @@ $config = json_decode(file_get_contents($configFile), true);
 $csrfToken = $_SESSION['csrf_token'] ?? bin2hex(random_bytes(32));
 $_SESSION['csrf_token'] = $csrfToken;
 
-// 处理所有 POST 动作
+// Handle POST actions | 处理所有 POST 动作
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
     
@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
         file_put_contents($configFile, json_encode($config, 192));
     } elseif ($_POST['action'] === 'save' && $valid_csrf) {
-        // 【核心修复】：名单直接存为字符串，不再强制转换数组，支持分号和换行
+        // Core fix: store lists as plain string; support semicolon/newline | 核心修复：名单存为字符串，支持分号/换行
         $newConfig = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
@@ -65,7 +65,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update' && $valid_csrf) {
-        // 执行一键更新脚本
+        // Trigger one-click update script | 执行一键更新脚本
         exec("sudo $updateScript 2>&1", $out, $res);
         $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新指令已发出！服务正在重启..." : "🚀 Update triggered! Service restarting...";
     } elseif (isset($_POST['action']) && !$valid_csrf) {
@@ -74,7 +74,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     
     set_disk('ro');
     
-    // 服务控制逻辑
+    // Service control logic | 服务控制逻辑
     $action = $_POST['action'] ?? '';
     if ($valid_csrf && in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo /bin/systemctl $action $serviceName");
     
@@ -89,7 +89,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     }
 }
 
-// 兼容函数：将 JSON 中的名单（无论是旧版数组还是新版字符串）正确显示在网页
+// Compatibility helper: render lists from JSON (string/array) | 兼容函数：渲染 JSON 名单（字符串/数组）
 function format_list_for_web($data) {
     if (is_array($data)) return implode("; ", $data);
     return (string)$data;
