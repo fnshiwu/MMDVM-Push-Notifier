@@ -1,6 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier Uninstaller
-# MMDVM-Push-Notifier 卸载脚本
+# MMDVM-Push-Notifier uninstaller | 卸载脚本
 
 echo "--- MMDVM-Push-Notifier Uninstaller ---"
 echo "WARNING: This will remove the service, configuration, and web interface."
@@ -11,12 +10,12 @@ if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
     exit 1
 fi
 
-# 1. Get write permission
+# 1) Get write permission | 获取写入权限
 echo "1. Requesting disk write permission..."
 sudo mount -o remount,rw / 2>/dev/null
 sudo /usr/local/bin/rpi-rw 2>/dev/null || sudo /usr/bin/rpi-rw 2>/dev/null
 
-# 2. Stop and disable service
+# 2) Stop and disable service | 停止并禁用服务
 echo "2. Stopping service..."
 if systemctl is-active --quiet mmdvm_push.service; then
     sudo systemctl stop mmdvm_push.service
@@ -25,7 +24,7 @@ sudo systemctl disable mmdvm_push.service 2>/dev/null
 sudo rm -f /etc/systemd/system/mmdvm_push.service
 sudo systemctl daemon-reload
 
-# 3. Remove files
+# 3) Remove files | 删除文件
 echo "3. Removing files..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
@@ -48,7 +47,7 @@ if [ -L "$DASH_LINK" ] || [ -f "$DASH_LINK" ]; then
     echo "   - Removed $DASH_LINK"
 fi
 
-# 4. Remove config (Optional)
+# 4) Remove config (optional) | 删除配置（可选）
 read -p "Remove configuration file? (y/n) / 删除配置文件吗？(y/n): " del_conf
 if [[ $del_conf == [yY] || $del_conf == [yY][eE][sS] ]]; then
     if [ -f "$CONFIG_FILE" ]; then
