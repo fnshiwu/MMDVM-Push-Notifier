@@ -1,7 +1,14 @@
+# Push filters and quiet mode | 推送过滤与静音模式
+#
+# Includes whitelist/blacklist, min duration, duplicate suppression
+# 包含白/黑名单、最小时长、重复抑制
+
 from datetime import datetime
 import time
 
 def _parse_list(data):
+    # Normalize list input (string or list) to uppercase items
+    # 统一处理列表输入（字符串或列表）为大写项
     if isinstance(data, list):
         data = ";".join(map(str, data))
     if not data or not isinstance(data, str):
@@ -13,6 +20,8 @@ def re_split(data: str):
     return [s for s in re.split(r'[;；,，\s\n]+', data) if s.strip()]
 
 def quiet_time(conf: dict) -> bool:
+    # Check quiet time window; supports cross-day ranges
+    # 检查静音时段窗口；支持跨天时间范围
     qc = conf.get('quiet_mode', {})
     if not qc.get('enabled'):
         return False
@@ -24,6 +33,8 @@ def quiet_time(conf: dict) -> bool:
     return now >= start or now <= end
 
 def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
+    # Decide whether to push based on config and deduplication
+    # 根据配置与去重逻辑判断是否推送
     focus = _parse_list(conf.get('focus_list', []))
     ignore = _parse_list(conf.get('ignore_list', []))
     my_callsign = (conf.get('my_callsign', '') or '').upper()
