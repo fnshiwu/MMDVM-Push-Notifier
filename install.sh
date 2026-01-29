@@ -1,15 +1,16 @@
 #!/bin/bash
-# MMDVM-Push-Notifier 强化版安装脚本 (v3.1.7) - 修复空间与路径问题
+# MMDVM-Push-Notifier enhanced installer (v3.1.7) | 强化版安装脚本
+# Fixes space and path issues | 修复空间与路径问题
 
 if [ "$EUID" -ne 0 ]; then 
   echo "请使用 sudo 运行此脚本: sudo ./install.sh"
   exit
 fi
 
-# 1. 准备磁盘与内存空间
+# 1) Prepare disk and tmpfs space | 准备磁盘与内存盘空间
 echo "1. 正在获取磁盘写入权限..."
 mount -o remount,rw / 2>/dev/null
-# 尝试兼容 Pi-Star 自带脚本
+# Try Pi-Star helper scripts | 兼容 Pi-Star 自带脚本
 if command -v rpi-rw >/dev/null 2>&1; then
     rpi-rw
 elif [ -f /usr/local/bin/rpi-rw ]; then
@@ -20,7 +21,7 @@ fi
 
 mount -o remount,size=32M /run 2>/dev/null 
 
-echo "1. 正在创建并设置目录权限..."
+echo "1. Creating and setting directory permissions... | 正在创建并设置目录权限..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 mkdir -p $INSTALL_DIR
 id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-push
@@ -37,16 +38,16 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-echo "2. 初始化配置文件并设置最小权限..."
+echo "2. Initialize config and set least permissions... | 初始化配置并设置最小权限..."
 CONFIG_FILE="/etc/mmdvm_push.json"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
 fi
 chown mmdvm-push:www-data $CONFIG_FILE
 chmod 660 $CONFIG_FILE
-echo "配置文件权限已设置为 660 (owner: mmdvm-push, group: www-data)"
+echo "Config file permission set to 660 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 660（owner: mmdvm-push, group: www-data）"
 
-echo "3. 部署 Web 管理页面 (软链接模式)..."
+echo "3. Deploy Web admin (symlink) | 部署 Web 管理页面（软链接）..."
 WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
 for D in $WEB_DIRS; do
     if [ -d "$D" ]; then
@@ -58,7 +59,7 @@ if [ -d "/var/www/dashboard" ]; then
 fi
 chown www-data:www-data $INSTALL_DIR/push_admin.php
 
-echo "4. 授权网页端【一键更新】免密权限..."
+echo "4. Grant web 'update' sudoers permissions | 授权网页端【一键更新】免密权限..."
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
 chmod +x $UPDATE_SCRIPT
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
@@ -71,7 +72,7 @@ EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 
-echo "5. 配置并启动系统服务..."
+echo "5. Install and start systemd service | 配置并启动 systemd 服务..."
 if [ -f "$INSTALL_DIR/mmdvm_push.service" ]; then
     cp $INSTALL_DIR/mmdvm_push.service /etc/systemd/system/
     chmod 644 /etc/systemd/system/mmdvm_push.service
@@ -80,7 +81,7 @@ else
     exit 1
 fi
 
-# 清理内存盘缓存防止重载失败
+# Clear tmpfs journal to avoid reload failure | 清理内存盘日志缓存避免重载失败
 rm -rf /run/log/journal/* 2>/dev/null
 
 systemctl daemon-reload
