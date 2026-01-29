@@ -1,3 +1,8 @@
+# Parser for MMDVMHost log lines | MMDVMHost 日志解析器
+#
+# Extracts callsign, target, duration, loss, BER, mode, slot
+# 提取呼号、群组、时长、丢包、误码、模式、时隙
+
 import re
 
 _re_master = re.compile(
@@ -10,6 +15,8 @@ _re_master = re.compile(
 )
 
 def parse_line(line: str):
+    # Parse a single log line; return event dict or None
+    # 解析单行日志；返回事件字典或 None
     if "end of" not in line.lower():
         return None
     m = _re_master.search(line)
