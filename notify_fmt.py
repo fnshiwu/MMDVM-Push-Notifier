@@ -1,6 +1,12 @@
+# Push message formatter | 推送消息格式化器
+#
+# Formats bilingual titles and body for voice/data events
+# 为语音/数据事件生成中英文标题与内容
 from datetime import datetime
 
 def format_message(conf: dict, event: dict, temp_str: str, info: dict):
+    # Build type label and body text according to UI language
+    # 根据界面语言生成类型标签与正文
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
     call = event['call']
     target = event['target']
