@@ -55,6 +55,8 @@ for HF in $NAV_FILES; do
         echo "   - Restored $HF from backup"
     elif [ -f "$HF" ]; then
         sudo sed -i 's#<div id="push-nav"[^<]*</div></body>#</body>#' "$HF" 2>/dev/null || true
+        sudo sed -i 's#<div id="push-nav"[^<]*</div></BODY>#</BODY>#' "$HF" 2>/dev/null || true
+        sudo sed -i 's#\\s*\\|\\s*<a href="/admin/push_admin.php"[^>]*>[^<]*</a>##g' "$HF" 2>/dev/null || true
     fi
 done
 
