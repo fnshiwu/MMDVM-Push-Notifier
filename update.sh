@@ -93,32 +93,13 @@ done
 if [ -d "/var/www/dashboard" ]; then
     sudo ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
 fi
-# 额外直链：在 /var/www/html 根目录也部署一份，便于直接访问
-if [ -d "/var/www/html" ]; then
-    sudo ln -sf $INSTALL_DIR/push_admin.php /var/www/html/push_admin.php
-fi
 sudo chown www-data:www-data $INSTALL_DIR/push_admin.php
-NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
-# 全量扫描所有网页模板文件，避免遗漏
-SCAN_FILES=$(find /var/www -type f \( -name "*.php" -o -name "*.html" -o -name "*.htm" -o -name "*.shtml" \) 2>/dev/null | tr '\n' ' ')
-for HF in $(echo "$NAV_FILES $SCAN_FILES" | tr ' ' '\n' | sort -u); do
-    if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
-        sudo cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        sudo sed -i -E '0,/(<a[^>]+href="\/admin\/[^"]*"[^>]*>.*?<\/a>)/ s//\1 | <a href="\/admin\/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置<\/a>/' "$HF" 2>/dev/null || true
-        if ! grep -q "push_admin.php" "$HF"; then
-            sudo sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></html>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</HTML>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></HTML>#' "$HF" 2>/dev/null || true
-        fi
-    fi
-done
 
 # 8) Read actual version from core script | 读取核心脚本版本
 # Fallback to preset if execution fails | 执行失败则回退预设
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
 if [ -z "$ACTUAL_VER" ]; then
-    echo "当前版本: v3.1.17 (无法通过脚本读取)"
+    echo "当前版本: v3.1.8 (无法通过脚本读取)"
 else
     echo "当前版本: $ACTUAL_VER"
 fi
