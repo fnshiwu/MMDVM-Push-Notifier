@@ -63,7 +63,16 @@ NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/
 for HF in $NAV_FILES; do
     if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
         cp "$HF" "$HF.bak_pushnav" 2>/dev/null
+        # 方案 A：在 </body> 前插入悬浮按钮
         sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></body>#' "$HF" 2>/dev/null || true
+        sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></BODY>#' "$HF" 2>/dev/null || true
+        sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></html>#' "$HF" 2>/dev/null || true
+        sed -i 's#</HTML>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></HTML>#' "$HF" 2>/dev/null || true
+        # 方案 B：在“管理/Admin”链接后追加按钮
+        sed -i 's#>管理</a>#>管理</a> | <a href="/admin/push_admin.php" style="color:#fff;font-weight:bold;">推送设置</a>#' "$HF" 2>/dev/null || true
+        sed -i 's#>Admin</a>#>Admin</a> | <a href="/admin/push_admin.php" style="color:#fff;font-weight:bold;">Push Settings</a>#' "$HF" 2>/dev/null || true
+        # 方案 C：只要出现 /admin/ 导航，就追加按钮（最保守）
+        sed -i 's#/admin/#/admin/#;t; s#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></body>#' "$HF" 2>/dev/null || true
     fi
 done
 
