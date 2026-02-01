@@ -56,9 +56,10 @@ for HF in $NAV_FILES; do
     elif [ -f "$HF" ]; then
         sudo sed -i 's#<div id="push-nav"[^<]*</div></body>#</body>#' "$HF" 2>/dev/null || true
         sudo sed -i 's#<div id="push-nav"[^<]*</div></BODY>#</BODY>#' "$HF" 2>/dev/null || true
-        sudo sed -i 's#\\s*\\|\\s*<a href="/admin/push_admin.php"[^>]*>[^<]*</a>##g' "$HF" 2>/dev/null || true
+        sudo sed -i -E 's#[[:space:]]*\|[[:space:]]*<a href="/admin/push_admin.php"[^>]*>[^<]*</a>##g' "$HF" 2>/dev/null || true
     fi
 done
+sudo find /var/www -type f -name "*.bak_pushnav" -delete 2>/dev/null
 
 # 4) Remove config (optional) | 删除配置（可选）
 read -p "Remove configuration file? (y/n) / 删除配置文件吗？(y/n): " del_conf
