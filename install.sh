@@ -57,20 +57,14 @@ done
 if [ -d "/var/www/dashboard" ]; then
     ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
 fi
-# 额外直链：在 /var/www/html 根目录也部署一份，便于直接访问
-if [ -d "/var/www/html" ]; then
-    ln -sf $INSTALL_DIR/push_admin.php /var/www/html/push_admin.php
-fi
 chown www-data:www-data $INSTALL_DIR/push_admin.php
 NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
-# 全量扫描所有网页模板文件，避免遗漏
-SCAN_FILES=$(find /var/www -type f \( -name "*.php" -o -name "*.html" -o -name "*.htm" -o -name "*.shtml" \) 2>/dev/null | tr '\n' ' ')
-for HF in $(echo "$NAV_FILES $SCAN_FILES" | tr ' ' '\n' | sort -u); do
+for HF in $(echo "$NAV_FILES" | tr ' ' '\n' | sort -u); do
     if [ -f "$HF" ]; then
         cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        # 仅当导航段落尚无推送设置链接时，按首次匹配 href="/admin/..." 追加一次
-        if ! grep -qE 'padding-right[^>]*>.*href="/admin/push_admin.php"' "$HF"; then
-            sed -i -E '0,/(<a[^>]+href="\/admin\/[^"]*"[^>]*>.*?<\/a>)/ s//\1 | <a href="\/admin\/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置<\/a>/' "$HF" 2>/dev/null || true
+        # 仅当文件中尚无推送设置链接时，针对行内的 <a href="/admin/">...</a> 后追加一次
+        if ! grep -q 'href="/admin/push_admin.php"' "$HF"; then
+            sed -i -E 's#(<a[^>]*href="/admin/"[^>]*>.*</a>)[[:space:]]*\|#\1 | <a href="/admin/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置</a> |#' "$HF" 2>/dev/null || true
         fi
         # 兜底：若页面没有浮动按钮，则在收尾插入一次
         if ! grep -q 'id="push-nav"' "$HF"; then
