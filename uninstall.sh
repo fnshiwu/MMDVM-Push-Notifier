@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier uninstaller | 卸载脚本
+# MMDVM-Push-Notifier uninstaller | 卸载脚本 (完整清理版)
 
 echo "--- MMDVM-Push-Notifier Uninstaller ---"
 echo "WARNING: This will remove the service, configuration, and web interface."
@@ -24,9 +24,20 @@ sudo systemctl disable mmdvm_push.service 2>/dev/null
 sudo rm -f /etc/systemd/system/mmdvm_push.service
 sudo systemctl daemon-reload
 
-# 3) Remove files | 删除文件
-echo "3. Removing files..."
+# 3) Remove files and clean UI | 删除文件并清理界面
+echo "3. Removing files and cleaning navigation menu..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+WEB_ROOT="/var/www/dashboard"
+ADMIN_INDEX="$WEB_ROOT/admin/index.php"
+
+# 4) 清理导航栏中的“推送设置”按钮 ---
+if [ -f "$ADMIN_INDEX" ]; then
+    # 使用 sed 删掉之前注入的链接及前置的分隔符
+    # 匹配模式： | <a href="push_admin.php" ...>推送设置</a>
+    sudo sed -i 's| \| <a href="push_admin.php" style="color: #ffffff;">推送设置</a>||g' "$ADMIN_INDEX"
+    echo "   - Removed 'Push Settings' button from navigation menu."
+fi
+
 WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
 DASH_LINK="/var/www/dashboard/push_admin.php"
 CONFIG_FILE="/etc/mmdvm_push.json"
@@ -47,7 +58,7 @@ if [ -L "$DASH_LINK" ] || [ -f "$DASH_LINK" ]; then
     echo "   - Removed $DASH_LINK"
 fi
 
-# 4) Remove config (optional) | 删除配置（可选）
+# 5) Remove config (optional) | 删除配置（可选）
 read -p "Remove configuration file? (y/n) / 删除配置文件吗？(y/n): " del_conf
 if [[ $del_conf == [yY] || $del_conf == [yY][eE][sS] ]]; then
     if [ -f "$CONFIG_FILE" ]; then
