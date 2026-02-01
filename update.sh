@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier auto update script (v3.1.8) | 核心全自动更新脚本
+# MMDVM-Push-Notifier auto update script (v3.1.7) | 核心全自动更新脚本
 # Target platforms: Pi-Star / Debian | 适用平台：Pi-Star / Debian
 
 echo "--- 开始执行一键更新流程 ---"
@@ -104,12 +104,12 @@ SCAN_FILES=$(find /var/www -type f \( -name "*.php" -o -name "*.html" -o -name "
 for HF in $(echo "$NAV_FILES $SCAN_FILES" | tr ' ' '\n' | sort -u); do
     if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
         sudo cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        sudo sed -i -E 's#(<a[^>]+href="/admin/[^"]*"[^>]*>.*?</a>)#\1 | <a href="/admin/push_admin.php">推送设置</a>#' "$HF" 2>/dev/null || true
+        sudo sed -i -E '0,/(<a[^>]+href="\/admin\/[^"]*"[^>]*>.*?<\/a>)/ s//\1 | <a href="\/admin\/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置<\/a>/' "$HF" 2>/dev/null || true
         if ! grep -q "push_admin.php" "$HF"; then
-            sudo sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></html>#' "$HF" 2>/dev/null || true
-            sudo sed -i 's#</HTML>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></HTML>#' "$HF" 2>/dev/null || true
+            sudo sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
+            sudo sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
+            sudo sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></html>#' "$HF" 2>/dev/null || true
+            sudo sed -i 's#</HTML>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></HTML>#' "$HF" 2>/dev/null || true
         fi
     fi
 done
