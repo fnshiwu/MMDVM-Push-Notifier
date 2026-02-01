@@ -95,6 +95,14 @@ if [ -d "/var/www/dashboard" ]; then
 fi
 sudo chown www-data:www-data $INSTALL_DIR/push_admin.php
 
+NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
+for HF in $NAV_FILES; do
+    if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
+        sudo cp "$HF" "$HF.bak_pushnav" 2>/dev/null
+        sudo sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">Push Settings</a></div></body>#' "$HF" 2>/dev/null || true
+    fi
+done
+
 # 8) Read actual version from core script | 读取核心脚本版本
 # Fallback to preset if execution fails | 执行失败则回退预设
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
