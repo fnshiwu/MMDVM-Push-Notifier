@@ -67,7 +67,7 @@ systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
 # --- 核心修改：原生白色字体注入 ---
-echo "7. 正在注入管理菜单按钮 (原生白色风格)..."
+echo "7. 正在注入管理菜单按钮..."
 SIDEBAR_FILE="/var/www/dashboard/admin/header.php"
 if [ -f "$SIDEBAR_FILE" ]; then
     # 检查是否已存在
