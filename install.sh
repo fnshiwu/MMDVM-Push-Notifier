@@ -66,10 +66,14 @@ NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/
 # 全量扫描所有网页模板文件，避免遗漏
 SCAN_FILES=$(find /var/www -type f \( -name "*.php" -o -name "*.html" -o -name "*.htm" -o -name "*.shtml" \) 2>/dev/null | tr '\n' ' ')
 for HF in $(echo "$NAV_FILES $SCAN_FILES" | tr ' ' '\n' | sort -u); do
-    if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
+    if [ -f "$HF" ]; then
         cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        sed -i -E '0,/(<a[^>]+href="\/admin\/[^"]*"[^>]*>.*?<\/a>)/ s//\1 | <a href="\/admin\/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置<\/a>/' "$HF" 2>/dev/null || true
-        if ! grep -q "push_admin.php" "$HF"; then
+        # 仅当导航段落尚无推送设置链接时，按首次匹配 href="/admin/..." 追加一次
+        if ! grep -qE 'padding-right[^>]*>.*href="/admin/push_admin.php"' "$HF"; then
+            sed -i -E '0,/(<a[^>]+href="\/admin\/[^"]*"[^>]*>.*?<\/a>)/ s//\1 | <a href="\/admin\/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置<\/a>/' "$HF" 2>/dev/null || true
+        fi
+        # 兜底：若页面没有浮动按钮，则在收尾插入一次
+        if ! grep -q 'id="push-nav"' "$HF"; then
             sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
             sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
             sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></html>#' "$HF" 2>/dev/null || true
