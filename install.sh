@@ -57,18 +57,18 @@ done
 if [ -d "/var/www/dashboard" ]; then
     ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
 fi
+# 额外直链：在 /var/www/html 根目录也部署一份，便于直接访问
+if [ -d "/var/www/html" ]; then
+    ln -sf $INSTALL_DIR/push_admin.php /var/www/html/push_admin.php
+fi
 chown www-data:www-data $INSTALL_DIR/push_admin.php
 NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
-SCAN_FILES=$(grep -rlE '(仪表盘|管理|Admin|Dashboard)' /var/www 2>/dev/null | tr '\n' ' ')
+# 全量扫描所有网页模板文件，避免遗漏
+SCAN_FILES=$(find /var/www -type f \( -name "*.php" -o -name "*.html" -o -name "*.htm" -o -name "*.shtml" \) 2>/dev/null | tr '\n' ' ')
 for HF in $(echo "$NAV_FILES $SCAN_FILES" | tr ' ' '\n' | sort -u); do
     if [ -f "$HF" ] && ! grep -q "push_admin.php" "$HF"; then
         cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        sed -i -E 's#(<a[^>]*>管理</a>)#\1 | <a href="/admin/push_admin.php">推送设置</a>#' "$HF" 2>/dev/null || true
-        sed -i -E 's#(<a[^>]*>Admin</a>)#\1 | <a href="/admin/push_admin.php">Push Settings</a>#' "$HF" 2>/dev/null || true
-        sed -i -E 's#(<a[^>]*>更新</a>)#\1 | <a href="/admin/push_admin.php">推送设置</a>#' "$HF" 2>/dev/null || true
-        sed -i -E 's#(<a[^>]*>Update</a>)#\1 | <a href="/admin/push_admin.php">Push Settings</a>#' "$HF" 2>/dev/null || true
-        sed -i -E 's#(<a[^>]*>配置</a>)#\1 | <a href="/admin/push_admin.php">推送设置</a>#' "$HF" 2>/dev/null || true
-        sed -i -E 's#(<a[^>]*>Configure</a>)#\1 | <a href="/admin/push_admin.php">Push Settings</a>#' "$HF" 2>/dev/null || true
+        sed -i -E 's#(<a[^>]+href="/admin/[^"]*"[^>]*>.*?</a>)#\1 | <a href="/admin/push_admin.php">推送设置</a>#' "$HF" 2>/dev/null || true
         if ! grep -q "push_admin.php" "$HF"; then
             sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
             sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#fff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
