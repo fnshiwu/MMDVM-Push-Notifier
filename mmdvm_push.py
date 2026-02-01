@@ -29,7 +29,7 @@ from notify_fmt import format_message
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.7"
+VERSION = "v3.1.8"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -518,6 +518,35 @@ class MMDVMMonitor:
         self._cpu_prev_idle = None
         self.last_activity_ts: float = 0.0
         
+    def _send_boot_notice(self, conf: Dict, network_ok: bool):
+        ip, cpu, mem = self.get_sys_info()
+        temp_str, _ = self.get_current_temp(conf)
+        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+        if lang == 'en':
+            status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
+            body = (
+                f"🚀 <b>Device Online</b> ({VERSION})\n"
+                f"🌐 <b>Network</b>: {status}\n"
+                f"🛠️ <b>Admin IP</b>: {ip}\n"
+                f"🌡️ <b>System Temp</b>: {temp_str}\n"
+                f"📊 <b>CPU</b>: {cpu}%\n"
+                f"💾 <b>Memory</b>: {mem}\n"
+                f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            PushService.send(conf, "⚙️ Boot Notice", body, is_voice=False, async_mode=False)
+        else:
+            status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
+            body = (
+                f"🚀 <b>设备已上线</b> ({VERSION})\n"
+                f"🌐 <b>网络状态</b>: {status}\n"
+                f"🛠️ <b>管理IP</b>: {ip}\n"
+                f"🌡️ <b>系统温度</b>: {temp_str}\n"
+                f"📊 <b>CPU占用</b>: {cpu}%\n"
+                f"💾 <b>内存占用</b>: {mem}\n"
+                f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
+        
 
     def _cpu_percent_proc(self) -> str:
         try:
@@ -784,33 +813,10 @@ class MMDVMMonitor:
         network_ok = self.check_network()
         
         if conf.get('boot_push_enabled', True):
-            ip, cpu, mem = self.get_sys_info()
-            temp_str, _ = self.get_current_temp(conf)
-            lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
-            if lang == 'en':
-                status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
-                body = (
-                    f"🚀 <b>Device Online</b> ({VERSION})\n"
-                    f"🌐 <b>Network</b>: {status}\n"
-                    f"🛠️ <b>Admin IP</b>: {ip}\n"
-                    f"🌡️ <b>System Temp</b>: {temp_str}\n"
-                    f"📊 <b>CPU</b>: {cpu}%\n"
-                    f"💾 <b>Memory</b>: {mem}\n"
-                    f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                PushService.send(conf, "⚙️ Boot Notice", body, is_voice=False, async_mode=False)
-            else:
-                status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-                body = (
-                    f"🚀 <b>设备已上线</b> ({VERSION})\n"
-                    f"🌐 <b>网络状态</b>: {status}\n"
-                    f"🛠️ <b>管理IP</b>: {ip}\n"
-                    f"🌡️ <b>系统温度</b>: {temp_str}\n"
-                    f"📊 <b>CPU占用</b>: {cpu}%\n"
-                    f"💾 <b>内存占用</b>: {mem}\n"
-                    f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                )
-                PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
+            self._send_boot_notice(conf, network_ok)
+            if not network_ok:
+                if self.check_network(max_attempts=30, interval=2):
+                    self._send_boot_notice(conf, True)
 
         logger.info(f"{VERSION} 监控就绪，正在监听日志行...")
         
