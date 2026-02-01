@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier auto update script (v3.1.7) | 核心全自动更新脚本
+# MMDVM-Push-Notifier auto update script (v3.1.8) | 核心全自动更新脚本
 # Target platforms: Pi-Star / Debian | 适用平台：Pi-Star / Debian
 
 echo "--- 开始执行一键更新流程 ---"
@@ -118,7 +118,7 @@ done
 # Fallback to preset if execution fails | 执行失败则回退预设
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
 if [ -z "$ACTUAL_VER" ]; then
-    echo "当前版本: v3.0.15 (无法通过脚本读取)"
+    echo "当前版本: v3.1.17 (无法通过脚本读取)"
 else
     echo "当前版本: $ACTUAL_VER"
 fi
