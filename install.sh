@@ -66,13 +66,11 @@ systemctl daemon-reload
 systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
-# --- 核心修改：原生白色字体注入 ---
 echo "7. 正在注入管理菜单按钮..."
 SIDEBAR_FILE="/var/www/dashboard/admin/header.php"
 if [ -f "$SIDEBAR_FILE" ]; then
     # 检查是否已存在
-    if ! grep -q "push_admin.php" "$SIDEBAR_FILE"; then
-        # 严格遵守 Pi-Star 默认 HTML 结构，不添加任何 style 属性
+    if ! grep -q "push_admin.php" "$SIDEBAR_FILE"; then        
         sed -i '/dash.php/a <li><a href="/admin/push_admin.php">推送设置</a></li>' "$SIDEBAR_FILE"
         echo "✅ 菜单注入成功！"
     else
