@@ -125,7 +125,6 @@ MMDVM-Push-Notifier/
 ## 🚀 安装方法 | Installation
 
 ```bash
-ssh pi-star@pi-star.local
 rpi-rw
 cd /home/pi-star
 git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
