@@ -5,15 +5,16 @@
 
 from datetime import datetime
 import time
+import re
 
 def _parse_list(data):
-    # Normalize list input (string or list) to uppercase items
-    # 统一处理列表输入（字符串或列表）为大写项
     if isinstance(data, list):
         data = ";".join(map(str, data))
     if not data or not isinstance(data, str):
         return []
-    return [item.strip().upper() for item in re_split(data)]
+    items = [item.strip().upper() for item in re_split(data)]
+    cs_pat = re.compile(r'^[A-Z0-9][A-Z0-9/\-]*$')
+    return [i for i in items if cs_pat.match(i) and not i.isdigit()]
 
 def re_split(data: str):
     import re
