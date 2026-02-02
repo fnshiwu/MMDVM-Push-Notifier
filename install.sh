@@ -48,14 +48,8 @@ chmod 660 $CONFIG_FILE
 echo "Config file permission set to 660 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 660（owner: mmdvm-push, group: www-data）"
 
 echo "3. Deploy Web admin (symlink) | 部署 Web 管理页面（软链接）..."
-WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
-for D in $WEB_DIRS; do
-    if [ -d "$D" ]; then
-        ln -sf $INSTALL_DIR/push_admin.php "$D/push_admin.php"
-    fi
-done
-if [ -d "/var/www/dashboard" ]; then
-    ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
+if [ -d "/var/www/dashboard/admin" ]; then
+    ln -sf $INSTALL_DIR/push_admin.php "/var/www/dashboard/admin/push_admin.php"
 fi
 chown www-data:www-data $INSTALL_DIR/push_admin.php
 ADMIN_INDEX="/var/www/dashboard/admin/index.php"
@@ -98,8 +92,10 @@ systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
 # --- 7. Post-Install Summary / 安装后检查 ---
+ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
+if [ -z "$ACTUAL_VER" ]; then ACTUAL_VER="unknown"; fi
 echo "--------------------------------------------------------"
-echo "✅ MMDVM-Push-Notifier Installed Successfully! (v3.1.8)"
+echo "✅ MMDVM-Push-Notifier Installed Successfully! ($ACTUAL_VER)"
 echo "--------------------------------------------------------"
 echo "🌐 Web Admin: http://pi-star.local/admin/push_admin.php"
 echo "   (Or via IP: http://$(hostname -I | awk '{print $1}')/admin/push_admin.php)"
