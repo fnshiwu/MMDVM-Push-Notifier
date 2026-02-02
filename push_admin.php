@@ -7,7 +7,7 @@ $updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
 
 // Version retrieval | 获取实时版本号
 $version = trim(@shell_exec("python3 $scriptPath --version"));
-if (empty($version)) { $version = 'v3.1.7'; }
+if (empty($version)) { $version = 'unknown'; }
 
 // Disk read/write control | 磁盘读写控制
 function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$mode / 2>/dev/null"); }
