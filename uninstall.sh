@@ -27,8 +27,7 @@ sudo systemctl daemon-reload
 # 3) Remove files | 删除文件
 echo "3. Removing files..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
-WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
-DASH_LINK="/var/www/dashboard/push_admin.php"
+ADMIN_LINK="/var/www/dashboard/admin/push_admin.php"
 CONFIG_FILE="/etc/mmdvm_push.json"
 
 if [ -d "$INSTALL_DIR" ]; then
@@ -36,15 +35,9 @@ if [ -d "$INSTALL_DIR" ]; then
     echo "   - Removed $INSTALL_DIR"
 fi
 
-for D in $WEB_DIRS; do
-    if [ -L "$D/push_admin.php" ] || [ -f "$D/push_admin.php" ]; then
-        sudo rm -f "$D/push_admin.php"
-        echo "   - Removed $D/push_admin.php"
-    fi
-done
-if [ -L "$DASH_LINK" ] || [ -f "$DASH_LINK" ]; then
-    sudo rm -f "$DASH_LINK"
-    echo "   - Removed $DASH_LINK"
+if [ -L "$ADMIN_LINK" ] || [ -f "$ADMIN_LINK" ]; then
+    sudo rm -f "$ADMIN_LINK"
+    echo "   - Removed $ADMIN_LINK"
 fi
 
 # Revert nav injection (restore backups or remove inserted block) | 还原导航注入（恢复备份或移除插入块）
