@@ -82,13 +82,11 @@ chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 fi
 
-# 按你的要求：更新脚本不再处理 Web 管理页软链接与导航，仅专注代码更新与服务重启
-
 # 8) Read actual version from core script | 读取核心脚本版本
 # Fallback to preset if execution fails | 执行失败则回退预设
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
 if [ -z "$ACTUAL_VER" ]; then
-    echo "当前版本: v3.0.15 (无法通过脚本读取)"
+    echo "当前版本: unknown (无法通过脚本读取)"
 else
     echo "当前版本: $ACTUAL_VER"
 fi
