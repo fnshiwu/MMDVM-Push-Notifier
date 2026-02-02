@@ -1,16 +1,15 @@
 #!/bin/bash
-# MMDVM-Push-Notifier enhanced installer (v3.1.8) | 强化版安装脚本
-# Fixes space and path issues | 修复空间与路径问题
+# MMDVM-Push-Notifier 强化版安装脚本 (v3.1.7) - 修复空间与路径问题
 
 if [ "$EUID" -ne 0 ]; then 
   echo "请使用 sudo 运行此脚本: sudo ./install.sh"
   exit
 fi
 
-# 1) Prepare disk and tmpfs space | 准备磁盘与内存盘空间
+# 1. 准备磁盘与内存空间
 echo "1. 正在获取磁盘写入权限..."
 mount -o remount,rw / 2>/dev/null
-# Try Pi-Star helper scripts | 兼容 Pi-Star 自带脚本
+# 尝试兼容 Pi-Star 自带脚本
 if command -v rpi-rw >/dev/null 2>&1; then
     rpi-rw
 elif [ -f /usr/local/bin/rpi-rw ]; then
@@ -21,7 +20,7 @@ fi
 
 mount -o remount,size=32M /run 2>/dev/null 
 
-echo "1. Creating and setting directory permissions... | 正在创建并设置目录权限..."
+echo "1. 正在创建并设置目录权限..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 mkdir -p $INSTALL_DIR
 id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-push
@@ -38,16 +37,16 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-echo "2. Initialize config and set least permissions... | 初始化配置并设置最小权限..."
+echo "2. 初始化配置文件并设置最小权限..."
 CONFIG_FILE="/etc/mmdvm_push.json"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
 fi
 chown mmdvm-push:www-data $CONFIG_FILE
 chmod 660 $CONFIG_FILE
-echo "Config file permission set to 660 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 660（owner: mmdvm-push, group: www-data）"
+echo "配置文件权限已设置为 660 (owner: mmdvm-push, group: www-data)"
 
-echo "3. Deploy Web admin (symlink) | 部署 Web 管理页面（软链接）..."
+echo "3. 部署 Web 管理页面 (软链接模式)..."
 WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
 for D in $WEB_DIRS; do
     if [ -d "$D" ]; then
@@ -58,25 +57,8 @@ if [ -d "/var/www/dashboard" ]; then
     ln -sf $INSTALL_DIR/push_admin.php /var/www/dashboard/push_admin.php
 fi
 chown www-data:www-data $INSTALL_DIR/push_admin.php
-NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
-for HF in $(echo "$NAV_FILES" | tr ' ' '\n' | sort -u); do
-    if [ -f "$HF" ]; then
-        cp "$HF" "$HF.bak_pushnav" 2>/dev/null
-        # 仅当文件中尚无推送设置链接时，针对行内的 <a href="/admin/">...</a> 后追加一次
-        if ! grep -q 'href="/admin/push_admin.php"' "$HF"; then
-            sed -i -E 's#(<a[^>]*href="/admin/"[^>]*>.*</a>)[[:space:]]*\|#\1 | <a href="/admin/push_admin.php" style="color:#ffffff;font-weight:bold;">推送设置</a> |#' "$HF" 2>/dev/null || true
-        fi
-        # 兜底：若页面没有浮动按钮，则在收尾插入一次
-        if ! grep -q 'id="push-nav"' "$HF"; then
-            sed -i 's#</body>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></body>#' "$HF" 2>/dev/null || true
-            sed -i 's#</BODY>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></BODY>#' "$HF" 2>/dev/null || true
-            sed -i 's#</html>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></html>#' "$HF" 2>/dev/null || true
-            sed -i 's#</HTML>#<div id="push-nav" style="position:fixed;top:8px;right:12px;z-index:99999;"><a href="/admin/push_admin.php" style="color:#ffffff;background:#444;padding:4px 8px;border-radius:3px;font-weight:bold;border:1px solid #000;text-decoration:none;">推送设置</a></div></HTML>#' "$HF" 2>/dev/null || true
-        fi
-    fi
-done
 
-echo "4. Grant web 'update' sudoers permissions | 授权网页端【一键更新】免密权限..."
+echo "4. 授权网页端【一键更新】免密权限..."
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
 chmod +x $UPDATE_SCRIPT
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
@@ -89,7 +71,7 @@ EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 
-echo "5. Install and start systemd service | 配置并启动 systemd 服务..."
+echo "5. 配置并启动系统服务..."
 if [ -f "$INSTALL_DIR/mmdvm_push.service" ]; then
     cp $INSTALL_DIR/mmdvm_push.service /etc/systemd/system/
     chmod 644 /etc/systemd/system/mmdvm_push.service
@@ -98,7 +80,7 @@ else
     exit 1
 fi
 
-# Clear tmpfs journal to avoid reload failure | 清理内存盘日志缓存避免重载失败
+# 清理内存盘缓存防止重载失败
 rm -rf /run/log/journal/* 2>/dev/null
 
 systemctl daemon-reload
@@ -107,7 +89,7 @@ systemctl restart mmdvm_push.service
 
 # --- 7. Post-Install Summary / 安装后检查 ---
 echo "--------------------------------------------------------"
-echo "✅ MMDVM-Push-Notifier Installed Successfully! (v3.1.8)"
+echo "✅ MMDVM-Push-Notifier Installed Successfully! (v3.1.7)"
 echo "--------------------------------------------------------"
 echo "🌐 Web Admin: http://pi-star.local/admin/push_admin.php"
 echo "   (Or via IP: http://$(hostname -I | awk '{print $1}')/admin/push_admin.php)"
