@@ -1,5 +1,6 @@
 #!/bin/bash
-# MMDVM-Push-Notifier uninstaller | 卸载脚本
+# MMDVM-Push-Notifier Uninstaller
+# MMDVM-Push-Notifier 卸载脚本
 
 echo "--- MMDVM-Push-Notifier Uninstaller ---"
 echo "WARNING: This will remove the service, configuration, and web interface."
@@ -10,12 +11,12 @@ if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
     exit 1
 fi
 
-# 1) Get write permission | 获取写入权限
+# 1. Get write permission
 echo "1. Requesting disk write permission..."
 sudo mount -o remount,rw / 2>/dev/null
 sudo /usr/local/bin/rpi-rw 2>/dev/null || sudo /usr/bin/rpi-rw 2>/dev/null
 
-# 2) Stop and disable service | 停止并禁用服务
+# 2. Stop and disable service
 echo "2. Stopping service..."
 if systemctl is-active --quiet mmdvm_push.service; then
     sudo systemctl stop mmdvm_push.service
@@ -24,7 +25,7 @@ sudo systemctl disable mmdvm_push.service 2>/dev/null
 sudo rm -f /etc/systemd/system/mmdvm_push.service
 sudo systemctl daemon-reload
 
-# 3) Remove files | 删除文件
+# 3. Remove files
 echo "3. Removing files..."
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 WEB_DIRS="/var/www/dashboard/admin /var/www/html/admin /var/www/admin"
@@ -47,21 +48,7 @@ if [ -L "$DASH_LINK" ] || [ -f "$DASH_LINK" ]; then
     echo "   - Removed $DASH_LINK"
 fi
 
-# Revert nav injection (restore backups or remove inserted block) | 还原导航注入（恢复备份或移除插入块）
-NAV_FILES="/var/www/dashboard/index.php /var/www/dashboard/admin/index.php /var/www/dashboard/admin/admin.php /var/www/html/index.php /var/www/admin/index.php"
-for HF in $NAV_FILES; do
-    if [ -f "$HF.bak_pushnav" ]; then
-        sudo mv -f "$HF.bak_pushnav" "$HF"
-        echo "   - Restored $HF from backup"
-    elif [ -f "$HF" ]; then
-        sudo sed -i 's#<div id="push-nav"[^<]*</div></body>#</body>#' "$HF" 2>/dev/null || true
-        sudo sed -i 's#<div id="push-nav"[^<]*</div></BODY>#</BODY>#' "$HF" 2>/dev/null || true
-        sudo sed -i -E 's#[[:space:]]*\|[[:space:]]*<a href="/admin/push_admin.php"[^>]*>[^<]*</a>##g' "$HF" 2>/dev/null || true
-    fi
-done
-sudo find /var/www -type f -name "*.bak_pushnav" -delete 2>/dev/null
-
-# 4) Remove config (optional) | 删除配置（可选）
+# 4. Remove config (Optional)
 read -p "Remove configuration file? (y/n) / 删除配置文件吗？(y/n): " del_conf
 if [[ $del_conf == [yY] || $del_conf == [yY][eE][sS] ]]; then
     if [ -f "$CONFIG_FILE" ]; then
