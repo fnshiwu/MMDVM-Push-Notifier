@@ -5,6 +5,9 @@ $serviceName = 'mmdvm_push.service';
 $scriptPath = '/home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py';
 $updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
 
+$accept = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '';
+$detected_lang = (stripos($accept, 'zh') !== false) ? 'cn' : 'en';
+
 // Version retrieval | 获取实时版本号
 $version = trim(@shell_exec("python3 $scriptPath --version"));
 if (empty($version)) { $version = 'unknown'; }
@@ -15,11 +18,17 @@ function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$m
 // Initialize configuration file | 初始化配置文件
 if (!file_exists($configFile)) {
     set_disk('rw');
-    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>"cn","ignore_list"=>"","focus_list"=>""], 192));
+    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>$detected_lang,"ignore_list"=>"","focus_list"=>""], 192));
     set_disk('ro');
 }
 
 $config = json_decode(file_get_contents($configFile), true);
+if (!isset($config['ui_lang']) || $config['ui_lang'] === '') {
+    set_disk('rw');
+    $config['ui_lang'] = $detected_lang;
+    file_put_contents($configFile, json_encode($config, 192));
+    set_disk('ro');
+}
 
 $csrfToken = $_SESSION['csrf_token'] ?? bin2hex(random_bytes(32));
 $_SESSION['csrf_token'] = $csrfToken;
@@ -119,12 +128,12 @@ $lang = [
     'cn' => [
         'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','btn_update'=>'检查更新','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
         'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'设备启动提醒','en_temp'=>'高温预警','th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)',
-        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'呼号使用分号 (;) 或换行分隔'
+        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'每行一个呼号或 TG ID'
     ],
     'en' => [
-        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','btn_update'=>'Update Now','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range',
+        'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','btn_update'=>'Update Now','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range (HH:mm, 24-hour format)',
         'boot_set'=>'Boot Notice','temp_set'=>'Temp Alert','en_boot'=>'Enable Boot Push','en_temp'=>'Enable Temp Alert','th_temp'=>'Threshold','int_temp'=>'Interval (min)',
-        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List','list_hint'=>'Separate by semicolon (;) or newline'
+        'tg_set'=>'Telegram Settings','wx_set'=>'WeChat (PushPlus) Settings','fs_set'=>'Feishu Settings','en'=>'Enable','ign_list'=>'Ignore List','foc_list'=>'Focus List','list_hint'=>'One Callsign or TG ID per line'
     ]
 ][$current_lang];
 ?>
