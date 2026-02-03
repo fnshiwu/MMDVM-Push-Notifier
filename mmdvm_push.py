@@ -29,7 +29,7 @@ from notify_fmt import format_message
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.8"
+VERSION = "v3.1.7"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -112,14 +112,6 @@ class ConfigManager:
                 (logger or logging.getLogger(__name__)).error(f"Config file read error: {e}")
         
         return cls._config
-
-    @staticmethod
-    def parse_list(data) -> List[str]:
-        if isinstance(data, list):
-            data = ";".join(map(str, data))
-        if not data or not isinstance(data, str):
-            return []
-        return [item.strip().upper() for item in re.split(r'[;；,，\s\n]+', data) if item.strip()]
 
     @staticmethod
     def _validate_config(raw: Dict) -> Dict:
@@ -359,7 +351,6 @@ class HamInfoManager:
 class PushService:
     _max_workers = PUSH_MAX_WORKERS
     _executor: Optional[ThreadPoolExecutor] = None
-    _push_semaphore = Semaphore(_max_workers)
     _initialized = False
 
     @classmethod
