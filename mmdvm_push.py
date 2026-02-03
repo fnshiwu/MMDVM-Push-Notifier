@@ -29,7 +29,7 @@ from notify_fmt import format_message
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.7"
+VERSION = "v3.1.9"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
