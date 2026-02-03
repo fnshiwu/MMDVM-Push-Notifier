@@ -18,7 +18,7 @@ def _parse_list(data):
 
 def re_split(data: str):
     import re
-    return [s for s in re.split(r'[;；,，\s\n]+', data) if s.strip()]
+    return [s for s in re.split(r'[;；]+', data) if s.strip()]
 
 def quiet_time(conf: dict) -> bool:
     # Check quiet time window; supports cross-day ranges
