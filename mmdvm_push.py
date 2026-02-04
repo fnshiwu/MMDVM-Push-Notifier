@@ -23,13 +23,13 @@ from functools import lru_cache
 from threading import Semaphore, Lock
 from typing import Dict, List, Optional, Tuple, Any
 from parser import parse_line
-from filters import quiet_time, should_push
-from notify_fmt import format_message
+from filters import quiet_time, should_push, should_temp_alert
+from notify_fmt import format_message, format_boot_notice, format_temp_alert, format_test_push, resolve_loc
 
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.1.9"
+VERSION = "v3.1.7"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -161,102 +161,6 @@ class HamInfoManager:
     def __init__(self, id_file: str):
         self.id_file = id_file
         self._io_lock = Semaphore(4)
-        self.geo_map = {
-            # 亚洲
-            "China": "🇨🇳 中国", "Hong Kong": "🇭🇰 中国香港", "Macao": "🇲🇴 中国澳门", 
-            "Taiwan": "🇹🇼 中国台湾", "Japan": "🇯🇵 日本", "Korea": "🇰🇷 韩国", 
-            "South Korea": "🇰🇷 韩国", "North Korea": "🇰🇵 朝鲜", "Thailand": "🇹🇭 泰国", 
-            "Singapore": "🇸🇬 新加坡", "Malaysia": "🇲🇾 马来西亚", "Indonesia": "🇮🇩 印度尼西亚",
-            "Philippines": "🇵🇭 菲律宾", "Vietnam": "🇻🇳 越南", "India": "🇮🇳 印度", 
-            "Pakistan": "🇵🇰 巴基斯坦", "Sri Lanka": "🇱🇰 斯里兰卡", "Bangladesh": "🇧🇩 孟加拉国", 
-            "Nepal": "🇳🇵 尼泊尔", "Mongolia": "🇲🇳 蒙古",
-            # 中东
-            "United Arab Emirates": "🇦🇪 阿联酋", "UAE": "🇦🇪 阿联酋", "Saudi Arabia": "🇸🇦 沙特", 
-            "Israel": "🇮🇱 以色列", "Turkey": "🇹🇷 土耳其", "Iran": "🇮🇷 伊朗", 
-            "Iraq": "🇮🇶 伊拉克", "Kuwait": "🇰🇼 科威特", "Oman": "🇴🇲 阿曼", 
-            "Qatar": "🇶🇦 卡塔尔", "Jordan": "🇯🇴 约旦", "Lebanon": "🇱🇧 黎巴嫩",
-            "Kazakhstan": "🇰🇿 哈萨克斯坦", "Uzbekistan": "🇺🇿 乌兹别克斯坦",
-            # 欧洲 (修复了错误)
-            "United Kingdom": "🇬🇧 英国", "UK": "🇬🇧 英国", "Germany": "🇩🇪 德国",
-            "France": "🇫🇷 法国", "Italy": "🇮🇹 意大利", "Spain": "🇪🇸 西班牙", 
-            "Portugal": "🇵🇹 葡萄牙", "Russia": "🇷🇺 俄罗斯", "Russian Federation": "🇷🇺 俄罗斯", 
-            "Netherlands": "🇳🇱 荷兰", "Belgium": "🇧🇪 比利时", "Switzerland": "🇨🇭 瑞士", 
-            "Austria": "🇦🇹 奥地利",  # 修复：原来是 🇦ᵗ
-            "Sweden": "🇸🇪 瑞典", "Norway": "🇳🇴 挪威", 
-            "Denmark": "🇩🇰 丹麦",  # 修复：原来是 🇩麦
-            "Finland": "🇫🇮 芬兰", "Poland": "🇵🇱 波兰",
-            "Czech Republic": "🇨🇿 捷克", "Czechia": "🇨🇿 捷克", "Hungary": "🇭🇺 匈牙利", 
-            "Greece": "🇬🇷 希腊", "Ireland": "🇮🇪 爱尔兰", "Romania": "🇷🇴 罗马尼亚", 
-            "Bulgaria": "🇧🇬 保加利亚", "Ukraine": "🇺🇦 乌克兰", "Belarus": "🇧🇾 白俄罗斯",
-            "Slovakia": "🇸🇰 斯洛伐克", "Croatia": "🇭🇷 克罗地亚", "Serbia": "🇷🇸 塞尔维亚", 
-            "Slovenia": "🇸🇮 斯洛文尼亚", "Estonia": "🇪🇪 爱沙尼亚", "Latvia": "🇱🇻 拉脱维亚", 
-            "Lithuania": "🇱🇹 立陶宛", "Iceland": "🇮🇸 冰岛", "Luxembourg": "🇱🇺 卢森堡", 
-            "Monaco": "🇲🇨 摩纳哥", "Cyprus": "🇨🇾 塞浦路斯", "Malta": "🇲🇹 马耳他",
-            # 美洲
-            "United States": "🇺🇸 美国", "USA": "🇺🇸 美国", "Canada": "🇨🇦 加拿大", 
-            "Mexico": "🇲🇽 墨西哥", "Cuba": "🇨🇺 古巴", "Jamaica": "🇯🇲 牙买加", 
-            "Puerto Rico": "🇵🇷 波多黎各", "Dominican Republic": "🇩🇴 多米尼加",
-            "Costa Rica": "🇨🇷 哥斯达黎加", "Panama": "🇵🇦 巴拿马", "Guatemala": "🇬🇹 危地马拉", 
-            "Honduras": "🇭🇳 洪都拉斯", "Brazil": "🇧🇷 巴西", "Argentina": "🇦🇷 阿根廷", 
-            "Chile": "🇨🇱 智利", "Colombia": "🇨🇴 哥伦比亚", "Peru": "🇵🇪 秘鲁", 
-            "Venezuela": "🇻🇪 委内瑞拉", "Uruguay": "🇺🇾 乌拉圭", "Paraguay": "🇵🇾 巴拉圭",
-            "Ecuador": "🇪🇨 厄瓜多尔", "Bolivia": "🇧🇴 玻利维亚",
-            # 大洋洲
-            "Australia": "🇦🇺 澳大利亚", "New Zealand": "🇳🇿 新西兰", "Fiji": "🇫🇯 斐济", 
-            "Papua New Guinea": "🇵🇬 巴布亚新几内亚",
-            # 非洲 (修复摩洛哥)
-            "South Africa": "🇿🇦 南非", "Egypt": "🇪🇬 埃及", "Nigeria": "🇳🇬 尼日利亚", 
-            "Kenya": "🇰🇪 肯尼亚", 
-            "Morocco": "🇲🇦 摩洛哥",  # 修复：原来写成了摩纳哥
-            "Algeria": "🇩🇿 阿尔及利亚", "Ethiopia": "🇪🇹 埃塞俄比亚", "Ghana": "🇬🇭 加纳",
-            "Tanzania": "🇹🇿 坦桑尼亚", "Uganda": "🇺🇬 乌干达", "Mauritius": "🇲🇺 毛里求斯", 
-            "Seychelles": "🇸🇨 塞舌尔"
-        }
-        self.geo_map_en = {
-            "China": "🇨🇳 China", "Hong Kong": "🇭🇰 Hong Kong", "Macao": "🇲🇴 Macao",
-            "Taiwan": "🇹🇼 Taiwan", "Japan": "🇯🇵 Japan", "Korea": "🇰🇷 Korea",
-            "South Korea": "🇰🇷 South Korea", "North Korea": "🇰🇵 North Korea", "Thailand": "🇹🇭 Thailand",
-            "Singapore": "🇸🇬 Singapore", "Malaysia": "🇲🇾 Malaysia", "Indonesia": "🇮🇩 Indonesia",
-            "Philippines": "🇵🇭 Philippines", "Vietnam": "🇻🇳 Vietnam", "India": "🇮🇳 India",
-            "Pakistan": "🇵🇰 Pakistan", "Sri Lanka": "🇱🇰 Sri Lanka", "Bangladesh": "🇧🇩 Bangladesh",
-            "Nepal": "🇳🇵 Nepal", "Mongolia": "🇲🇳 Mongolia",
-            "United Arab Emirates": "🇦🇪 United Arab Emirates", "UAE": "🇦🇪 United Arab Emirates", "Saudi Arabia": "🇸🇦 Saudi Arabia",
-            "Israel": "🇮🇱 Israel", "Turkey": "🇹🇷 Turkey", "Iran": "🇮🇷 Iran",
-            "Iraq": "🇮🇶 Iraq", "Kuwait": "🇰🇼 Kuwait", "Oman": "🇴🇲 Oman",
-            "Qatar": "🇶🇦 Qatar", "Jordan": "🇯🇴 Jordan", "Lebanon": "🇱🇧 Lebanon",
-            "Kazakhstan": "🇰🇿 Kazakhstan", "Uzbekistan": "🇺🇿 Uzbekistan",
-            "United Kingdom": "🇬🇧 United Kingdom", "UK": "🇬🇧 United Kingdom", "Germany": "🇩🇪 Germany",
-            "France": "🇫🇷 France", "Italy": "🇮🇹 Italy", "Spain": "🇪🇸 Spain",
-            "Portugal": "🇵🇹 Portugal", "Russia": "🇷🇺 Russia", "Russian Federation": "🇷🇺 Russia",
-            "Netherlands": "🇳🇱 Netherlands", "Belgium": "🇧🇪 Belgium", "Switzerland": "🇨🇭 Switzerland",
-            "Austria": "🇦🇹 Austria",
-            "Sweden": "🇸🇪 Sweden", "Norway": "🇳🇴 Norway",
-            "Denmark": "🇩🇰 Denmark",
-            "Finland": "🇫🇮 Finland", "Poland": "🇵🇱 Poland",
-            "Czech Republic": "🇨🇿 Czech Republic", "Czechia": "🇨🇿 Czech Republic", "Hungary": "🇭🇺 Hungary",
-            "Greece": "🇬🇷 Greece", "Ireland": "🇮🇪 Ireland", "Romania": "🇷🇴 Romania",
-            "Bulgaria": "🇧🇬 Bulgaria", "Ukraine": "🇺🇦 Ukraine", "Belarus": "🇧🇾 Belarus",
-            "Slovakia": "🇸🇰 Slovakia", "Croatia": "🇭🇷 Croatia", "Serbia": "🇷🇸 Serbia",
-            "Slovenia": "🇸🇮 Slovenia", "Estonia": "🇪🇪 Estonia", "Latvia": "🇱🇻 Latvia",
-            "Lithuania": "🇱🇹 Lithuania", "Iceland": "🇮🇸 Iceland", "Luxembourg": "🇱🇺 Luxembourg",
-            "Monaco": "🇲🇨 Monaco", "Cyprus": "🇨🇾 Cyprus", "Malta": "🇲🇹 Malta",
-            "United States": "🇺🇸 United States", "USA": "🇺🇸 United States", "Canada": "🇨🇦 Canada",
-            "Mexico": "🇲🇽 Mexico", "Cuba": "🇨🇺 Cuba", "Jamaica": "🇯🇲 Jamaica",
-            "Puerto Rico": "🇵🇷 Puerto Rico", "Dominican Republic": "🇩🇴 Dominican Republic",
-            "Costa Rica": "🇨🇷 Costa Rica", "Panama": "🇵🇦 Panama", "Guatemala": "🇬🇹 Guatemala",
-            "Honduras": "🇭🇳 Honduras", "Brazil": "🇧🇷 Brazil", "Argentina": "🇦🇷 Argentina",
-            "Chile": "🇨🇱 Chile", "Colombia": "🇨🇴 Colombia", "Peru": "🇵🇪 Peru",
-            "Venezuela": "🇻🇪 Venezuela", "Uruguay": "🇺🇾 Uruguay", "Paraguay": "🇵🇾 Paraguay",
-            "Ecuador": "🇪🇨 Ecuador", "Bolivia": "🇧🇴 Bolivia",
-            "Australia": "🇦🇺 Australia", "New Zealand": "🇳🇿 New Zealand", "Fiji": "🇫🇯 Fiji",
-            "Papua New Guinea": "🇵🇬 Papua New Guinea",
-            "South Africa": "🇿🇦 South Africa", "Egypt": "🇪🇬 Egypt", "Nigeria": "🇳🇬 Nigeria",
-            "Kenya": "🇰🇪 Kenya",
-            "Morocco": "🇲🇦 Morocco",
-            "Algeria": "🇩🇿 Algeria", "Ethiopia": "🇪🇹 Ethiopia", "Ghana": "🇬🇭 Ghana",
-            "Tanzania": "🇹🇿 Tanzania", "Uganda": "🇺🇬 Uganda", "Mauritius": "🇲🇺 Mauritius",
-            "Seychelles": "🇸🇨 Seychelles"
-        }
 
     def get_info(self, callsign: str) -> Dict[str, str]:
         """获取呼号信息，带手动缓存管理"""
@@ -318,23 +222,9 @@ class HamInfoManager:
                     city = parts[4].strip().title() if len(parts) > 4 else ""
                     state = parts[5].strip().upper() if len(parts) > 5 else ""
                     country = parts[6].strip() if len(parts) > 6 else ""
-                    
-                    country_cn = country
-                    country_en = country
-                    if any('\u4e00' <= char <= '\u9fff' for char in country):
-                        for k, v in self.geo_map.items():
-                            if country == v:
-                                country_cn = v
-                                country_en = self.geo_map_en.get(k, k)
-                                break
-                    else:
-                        country_cn = self.geo_map.get(country, country)
-                        country_en = self.geo_map_en.get(country, country)
-                    
                     full_name = f"{first_name} {last_name}".strip().upper()
                     name_part = f" ({full_name})" if full_name else ""
-                    loc_en = f"{city}, {state} ({country_en})" if city or state else country_en
-                    loc_cn = f"{city}, {state} ({country_cn})" if city or state else country_cn
+                    loc_en, loc_cn = resolve_loc(city, state, country)
                     
                     return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
                     
@@ -512,31 +402,8 @@ class MMDVMMonitor:
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
         ip, cpu, mem = self.get_sys_info()
         temp_str, _ = self.get_current_temp(conf)
-        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
-        if lang == 'en':
-            status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
-            body = (
-                f"🚀 <b>Device Online</b> ({VERSION})\n"
-                f"🌐 <b>Network</b>: {status}\n"
-                f"🛠️ <b>Admin IP</b>: {ip}\n"
-                f"🌡️ <b>System Temp</b>: {temp_str}\n"
-                f"📊 <b>CPU</b>: {cpu}%\n"
-                f"💾 <b>Memory</b>: {mem}\n"
-                f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            PushService.send(conf, "⚙️ Boot Notice", body, is_voice=False, async_mode=False)
-        else:
-            status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
-            body = (
-                f"🚀 <b>设备已上线</b> ({VERSION})\n"
-                f"🌐 <b>网络状态</b>: {status}\n"
-                f"🛠️ <b>管理IP</b>: {ip}\n"
-                f"🌡️ <b>系统温度</b>: {temp_str}\n"
-                f"📊 <b>CPU占用</b>: {cpu}%\n"
-                f"💾 <b>内存占用</b>: {mem}\n"
-                f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-            )
-            PushService.send(conf, "⚙️ 系统启动通知", body, is_voice=False, async_mode=False)
+        title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
+        PushService.send(conf, title, body, is_voice=False, async_mode=False)
         
 
     def _cpu_percent_proc(self) -> str:
@@ -729,38 +596,16 @@ class MMDVMMonitor:
             return "N/A", 0.0
 
     def check_temp_alert(self, conf: Dict):
-        if not conf.get('temp_alert_enabled'):
-            return
-        
         now = time.time()
         if now - self.last_temp_check_time < 60:
             return
         self.last_temp_check_time = now
-        
         display_str, current_val = self.get_current_temp(conf)
-        threshold = float(conf.get('temp_threshold', 65.0))
-        
-        if current_val >= threshold:
-            interval_sec = int(conf.get('temp_interval', 30)) * 60
-            if now - self.last_temp_alert_time > interval_sec:
-                self.last_temp_alert_time = now
-                lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
-                if lang == 'en':
-                    alert_body = (
-                        f"🚨 <b>High Temperature Alert</b>\n"
-                        f"🔥 <b>Current Temp</b>: {display_str}\n"
-                        f"⚠️ <b>Threshold</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
-                        f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
-                    )
-                    PushService.send(conf, "🌡️ Hardware Status Warning", alert_body, is_voice=False)
-                else:
-                    alert_body = (
-                        f"🚨 <b>硬件高温预警</b>\n"
-                        f"🔥 <b>当前温度</b>: {display_str}\n"
-                        f"⚠️ <b>预警阈值</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
-                        f"⏰ <b>检测时间</b>: {datetime.now().strftime('%H:%M:%S')}"
-                    )
-                    PushService.send(conf, "🌡️ 硬件状态警告", alert_body, is_voice=False)
+        if should_temp_alert(conf, self.last_temp_alert_time, now, current_val):
+            self.last_temp_alert_time = now
+            threshold = float(conf.get('temp_threshold', 65.0))
+            title, body = format_temp_alert(conf, display_str, threshold)
+            PushService.send(conf, title, body, is_voice=False)
 
     def get_latest_log(self) -> Optional[str]:
         try:
@@ -886,27 +731,8 @@ if __name__ == "__main__":
         conf = ConfigManager.get_config()
         ip, cpu, mem = monitor.get_sys_info()
         temp_str, _ = monitor.get_current_temp(conf)
-        lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
-        if lang == 'en':
-            test_body = (
-                f"Channel test success ({VERSION})\n"
-                f"🌐 <b>IP</b>: {ip}\n"
-                f"🌡️ <b>Temp</b>: {temp_str}\n"
-                f"📊 <b>CPU (System)</b>: {cpu}%\n"
-                f"💾 <b>Memory</b>: {mem}\n"
-                f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
-            )
-            PushService.send(conf, "🔔 Test Notification", test_body, is_voice=False, async_mode=False)
-        else:
-            test_body = (
-                f"通道测试成功 ({VERSION})\n"
-                f"🌐 <b>IP</b>: {ip}\n"
-                f"🌡️ <b>温度</b>: {temp_str}\n"
-                f"📊 <b>CPU（整机）</b>: {cpu}%\n"
-                f"💾 <b>内存</b>: {mem}\n"
-                f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}"
-            )
-            PushService.send(conf, "🔔 测试推送", test_body, is_voice=False, async_mode=False)
+        title, test_body = format_test_push(conf, VERSION, ip, temp_str, cpu, mem)
+        PushService.send(conf, title, test_body, is_voice=False, async_mode=False)
         print("Success")
     elif len(sys.argv) > 1 and sys.argv[1] == "--health":
         conf = ConfigManager.get_config()
