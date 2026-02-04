@@ -14,11 +14,18 @@ if (empty($version)) { $version = 'unknown'; }
 
 // Disk read/write control | 磁盘读写控制
 function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$mode / 2>/dev/null"); }
+function atomic_write($path, $json) {
+    $tmp = $path . '.tmp';
+    $bytes = @file_put_contents($tmp, $json, LOCK_EX);
+    if ($bytes === false) return false;
+    @chmod($tmp, 0666);
+    return @rename($tmp, $path);
+}
 
 // Initialize configuration file | 初始化配置文件
 if (!file_exists($configFile)) {
     set_disk('rw');
-    file_put_contents($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>$detected_lang,"ignore_list"=>"","focus_list"=>""], 192));
+    atomic_write($configFile, json_encode(["my_callsign"=>"BA4SMQ","min_duration"=>5.0,"ui_lang"=>$detected_lang,"ignore_list"=>"","focus_list"=>""], 192));
     set_disk('ro');
 }
 
@@ -26,7 +33,7 @@ $config = json_decode(file_get_contents($configFile), true);
 if (!isset($config['ui_lang']) || $config['ui_lang'] === '') {
     set_disk('rw');
     $config['ui_lang'] = $detected_lang;
-    file_put_contents($configFile, json_encode($config, 192));
+    atomic_write($configFile, json_encode($config, 192));
     set_disk('ro');
 }
 
@@ -47,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
-        file_put_contents($configFile, json_encode($config, 192));
+        atomic_write($configFile, json_encode($config, 192));
     } elseif ($_POST['action'] === 'save' && $valid_csrf) {
         // Core fix: store lists as plain string; support semicolon/newline | 核心修复：名单存为字符串，支持分号/换行
         $newConfig = [
@@ -66,8 +73,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "focus_list" => trim($_POST['focus_list']),
             "ui_lang" => $current_ui_lang
         ];
-        $writeRes = file_put_contents($configFile, json_encode($newConfig, 448));
-        if ($writeRes !== false) {
+        $writeRes = atomic_write($configFile, json_encode($newConfig, 448));
+        if ($writeRes) {
             $config = $newConfig;
             $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         } else {
