@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 import os
 import time
 import json
@@ -69,12 +68,9 @@ def setup_logging():
     if APP_LOG_DIR != "/var/log/pi-star/":
         logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
 
-
 # =========================
 # Config Manager
 # =========================
- 
-
     @staticmethod
     def _validate_config(raw: Dict) -> Dict:
         defaults = {
@@ -110,7 +106,6 @@ def setup_logging():
             (logger or logging.getLogger(__name__)).warning(f"Config sanitize error: {e}")
         return conf
 
-
 # =========================
 # Ham Info Manager (修复后的映射表)
 # =========================
@@ -119,13 +114,7 @@ class HamInfoManager:
         self.identity = Identity(id_file)
     def get_info(self, callsign: str) -> Dict[str, str]:
         return self.identity.get_info(callsign)
-
-
- 
-
-
 atexit.register(PushService.shutdown)
-
 
 # =========================
 # Monitor Logic
@@ -141,8 +130,7 @@ class MMDVMMonitor:
         ip, cpu, mem = self.get_sys_info()
         temp_str, _ = self.get_current_temp(conf)
         title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
-        PushService.send(conf, title, body, is_voice=False, async_mode=False)
-        
+        PushService.send(conf, title, body, is_voice=False, async_mode=False)        
 
     def _cpu_percent_proc(self) -> str:
         return self.hw._cpu_percent_proc()
@@ -295,7 +283,6 @@ class MMDVMMonitor:
         self.last_activity_ts = time.time()
         PushService.send(conf, type_label, body, is_voice=event['is_voice'])
         logger.info(f"推送完成: {event['call']} -> {event['target']}")
-
 
 # =========================
 # Entry
