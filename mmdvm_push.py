@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import os
 import time
 import json
@@ -25,7 +26,7 @@ from config import ConfigManager
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.2.6"
+VERSION = "v3.2.8"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -68,6 +69,7 @@ def setup_logging():
     if APP_LOG_DIR != "/var/log/pi-star/":
         logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
 
+
 # =========================
 # Config Manager
 # =========================
@@ -106,6 +108,7 @@ def setup_logging():
             (logger or logging.getLogger(__name__)).warning(f"Config sanitize error: {e}")
         return conf
 
+
 # =========================
 # Ham Info Manager (修复后的映射表)
 # =========================
@@ -114,6 +117,7 @@ class HamInfoManager:
         self.identity = Identity(id_file)
     def get_info(self, callsign: str) -> Dict[str, str]:
         return self.identity.get_info(callsign)
+
 atexit.register(PushService.shutdown)
 
 # =========================
@@ -133,7 +137,7 @@ class MMDVMMonitor:
         PushService.send(conf, title, body, is_voice=False, async_mode=False)        
 
     def _cpu_percent_proc(self) -> str:
-        return self.hw._cpu_percent_proc()
+        return self.hw._cpu_percent_top()
 
     def _cpu_percent_top(self) -> str:
         return self.hw._cpu_percent_top()
