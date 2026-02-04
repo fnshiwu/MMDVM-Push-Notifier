@@ -110,6 +110,10 @@ It monitors `MMDVMHost` logs and sends structured notifications for **voice and 
 MMDVM-Push-Notifier/
 ├── mmdvm_push.py        # 核心服务入口，日志轮询/推送/健康输出
 ├── parser.py            # 日志解析（语音/数据、呼号、时长、时隙等）
+├── identity.py          # 呼号检索与缓存（呼号、姓名、地区等）
+├── hardware.py          # 系统资源与温度报警（IP、内存，CPU等）
+├── notifier.py          # 迁移推送服务及重试逻辑（微信、TG、飞书等）
+├── config.py            # 配置加载与校验（检验现有配置）
 ├── filters.py           # 过滤策略（白/黑名单、静音时段、重复抑制等）
 ├── notify_fmt.py        # 推送文案格式化（中英文/i18n）
 ├── push_admin.php       # Web 管理面板（含健康状态只读面板）
