@@ -50,3 +50,11 @@ def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
     if call == (last_msg.get("call") or "") and (curr_ts - float(last_msg.get("ts") or 0)) < 3:
         return False
     return True
+def should_temp_alert(conf: dict, last_alert_time: float, now: float, current_val: float) -> bool:
+    if not conf.get('temp_alert_enabled'):
+        return False
+    threshold = float(conf.get('temp_threshold', 65.0))
+    if current_val < threshold:
+        return False
+    interval_sec = int(conf.get('temp_interval', 30)) * 60
+    return (now - last_alert_time) > interval_sec
