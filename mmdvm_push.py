@@ -9,27 +9,24 @@ import re
 import urllib.request
 import urllib.parse
 import sys
-import base64
-import hmac
-import hashlib
-import mmap
 import subprocess
 import atexit
 import logging
 import tempfile
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
-from threading import Semaphore, Lock
 from typing import Dict, List, Optional, Tuple, Any
 from parser import parse_line
-from filters import quiet_time, should_push, should_temp_alert
-from notify_fmt import format_message, format_boot_notice, format_temp_alert, format_test_push, resolve_loc
+from filters import quiet_time, should_push
+from notify_fmt import format_message, format_boot_notice, format_temp_alert, format_test_push
+from identity import Identity
+from hardware import Hardware
+from notifier import PushService
+from config import ConfigManager
 
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.2.2"
+VERSION = "v3.2.6"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -76,42 +73,7 @@ def setup_logging():
 # =========================
 # Config Manager
 # =========================
-class ConfigManager:
-    _config: Dict = {}
-    _last_mtime: float = 0
-    _check_interval: int = 5
-    _last_check_time: float = 0
-    _lock = Lock()
-
-    @classmethod
-    def get_config(cls) -> Dict:
-        now = time.time()
-        if now - cls._last_check_time < cls._check_interval:
-            return cls._config
-        
-        with cls._lock:
-            # Double-check after acquiring lock
-            if now - cls._last_check_time < cls._check_interval:
-                return cls._config
-            cls._last_check_time = now
-            
-            if not os.path.exists(CONFIG_FILE):
-                return {}
-            
-            try:
-                mtime = os.path.getmtime(CONFIG_FILE)
-                if mtime > cls._last_mtime:
-                    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                        raw = json.load(f)
-                    cls._config = cls._validate_config(raw)
-                    cls._last_mtime = mtime
-                    (logger or logging.getLogger(__name__)).debug("Config reloaded")
-            except json.JSONDecodeError as e:
-                (logger or logging.getLogger(__name__)).error(f"Config JSON parse error: {e}")
-            except OSError as e:
-                (logger or logging.getLogger(__name__)).error(f"Config file read error: {e}")
-        
-        return cls._config
+ 
 
     @staticmethod
     def _validate_config(raw: Dict) -> Dict:
@@ -153,234 +115,13 @@ class ConfigManager:
 # Ham Info Manager (修复后的映射表)
 # =========================
 class HamInfoManager:
-    # 使用类级别的缓存，避免实例方法 lru_cache 问题
-    _cache: Dict[str, Dict[str, str]] = {}
-    _cache_lock = Lock()
-    _max_cache_size = 4096
-
     def __init__(self, id_file: str):
-        self.id_file = id_file
-        self._io_lock = Semaphore(4)
-
+        self.identity = Identity(id_file)
     def get_info(self, callsign: str) -> Dict[str, str]:
-        """获取呼号信息，带手动缓存管理"""
-        # 检查缓存
-        with self._cache_lock:
-            if callsign in self._cache:
-                return self._cache[callsign]
-        
-        result = self._fetch_info(callsign)
-        
-        # 更新缓存
-        with self._cache_lock:
-            # 简单的 LRU：如果超过最大大小，清除一半
-            if len(self._cache) >= self._max_cache_size:
-                keys_to_remove = list(self._cache.keys())[:self._max_cache_size // 2]
-                for k in keys_to_remove:
-                    del self._cache[k]
-            self._cache[callsign] = result
-        
-        return result
-
-    def _fetch_info(self, callsign: str) -> Dict[str, str]:
-        """实际从文件获取信息"""
-        default_result = {"name": "", "loc": "Unknown"}
-        
-        if not os.path.exists(self.id_file):
-            return default_result
-        
-        if not self._io_lock.acquire(timeout=2):
-            logger.warning(f"IO lock timeout for callsign: {callsign}")
-            return default_result
-        
-        try:
-            file_size = os.path.getsize(self.id_file)
-            if file_size == 0:
-                return default_result
-                
-            with open(self.id_file, 'rb') as f:
-                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    query = f",{callsign},".encode('utf-8')
-                    idx = mm.find(query)
-                    if idx == -1:
-                        return default_result
-                    
-                    start = mm.rfind(b'\n', 0, idx) + 1
-                    end = mm.find(b'\n', idx)
-                    if end == -1:
-                        end = len(mm)
-                    line_bytes = mm[start:end]
-                    
-                    try:
-                        line = line_bytes.decode('utf-8')
-                    except UnicodeDecodeError:
-                        line = line_bytes.decode('gb18030', errors='ignore')
-                    
-                    parts = line.split(',')
-                    first_name = parts[2].strip() if len(parts) > 2 else ""
-                    last_name = parts[3].strip() if len(parts) > 3 else ""
-                    city = parts[4].strip().title() if len(parts) > 4 else ""
-                    state = parts[5].strip().upper() if len(parts) > 5 else ""
-                    country = parts[6].strip() if len(parts) > 6 else ""
-                    full_name = f"{first_name} {last_name}".strip().upper()
-                    name_part = f" ({full_name})" if full_name else ""
-                    loc_en, loc_cn = resolve_loc(city, state, country)
-                    
-                    return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
-                    
-        except (OSError, ValueError) as e:
-            logger.debug(f"Error fetching info for {callsign}: {e}")
-            return default_result
-        finally:
-            self._io_lock.release()
+        return self.identity.get_info(callsign)
 
 
-# =========================
-# Push Service
-# =========================
-class PushService:
-    _max_workers = PUSH_MAX_WORKERS
-    _executor: Optional[ThreadPoolExecutor] = None
-    _initialized = False
-
-    @classmethod
-    def _ensure_executor(cls):
-        if cls._executor is None:
-            cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
-            cls._initialized = True
-
-    @staticmethod
-    def get_fs_sign(secret: str, timestamp: str) -> str:
-        string_to_sign = f'{timestamp}\n{secret}'
-        hmac_code = hmac.new(
-            string_to_sign.encode("utf-8"), 
-            digestmod=hashlib.sha256
-        ).digest()
-        return base64.b64encode(hmac_code).decode('utf-8')
-
-    @classmethod
-    def _do_push_logic(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        # Remove redundant semaphore if executor already limits concurrency, 
-        # but keep it if we want to limit active push executions specifically.
-        # Given max_workers=3 in executor, this semaphore is redundant but harmless.
-        # Refactored for clarity.
-        
-        # 1. Feishu
-        if config.get('push_fs_enabled') and config.get('fs_webhook'):
-            cls._push_feishu(config, type_label, body_text, is_voice)
-
-        # 2. WeChat (PushPlus)
-        if config.get('push_wx_enabled') and config.get('wx_token'):
-            cls._push_wechat(config, type_label, body_text)
-
-        # 3. Telegram
-        if config.get('push_tg_enabled') and config.get('tg_token') and config.get('tg_chat_id'):
-            cls._push_telegram(config, type_label, body_text)
-
-    @classmethod
-    def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        try:
-            ts = str(int(time.time()))
-            template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
-            fs_payload = {
-                "msg_type": "interactive",
-                "card": {
-                    "header": {
-                        "title": {"tag": "plain_text", "content": type_label},
-                        "template": template
-                    },
-                    "elements": [{
-                        "tag": "div",
-                        "text": {"tag": "lark_md", "content": body_text}
-                    }]
-                }
-            }
-            if config.get('fs_secret'):
-                fs_payload["timestamp"] = ts
-                fs_payload["sign"] = cls.get_fs_sign(config['fs_secret'], ts)
-            
-            cls.post_with_retry(
-                config['fs_webhook'],
-                data=json.dumps(fs_payload).encode('utf-8'),
-                is_json=True
-            )
-        except Exception as e:
-            logger.error(f"Feishu push failed: {e}")
-
-    @classmethod
-    def _push_wechat(cls, config: Dict, type_label: str, body_text: str):
-        try:
-            br = "<br>"
-            html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
-            payload = {
-                "token": config['wx_token'],
-                "title": type_label,
-                "content": html_content,
-                "template": "html"
-            }
-            cls.post_with_retry(
-                "http://www.pushplus.plus/send",
-                data=json.dumps(payload).encode('utf-8'),
-                is_json=True
-            )
-        except Exception as e:
-            logger.error(f"WeChat push failed: {e}")
-
-    @classmethod
-    def _push_telegram(cls, config: Dict, type_label: str, body_text: str):
-        try:
-            text = f"<b>{type_label}</b>\n\n{body_text}"
-            url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
-            data = urllib.parse.urlencode({
-                "chat_id": config['tg_chat_id'],
-                "text": text,
-                "parse_mode": "HTML"
-            }).encode('utf-8')
-            cls.post_with_retry(url, data=data)
-        except Exception as e:
-            logger.error(f"Telegram push failed: {e}")
-
-    @classmethod
-    def post_with_retry(cls, url: str, data: bytes = None, is_json: bool = False, 
-                        retries: int = PUSH_RETRY) -> Optional[str]:
-        last_error = None
-        for i in range(retries + 1):
-            try:
-                req = urllib.request.Request(url, data=data, method='POST')
-                if is_json:
-                    req.add_header('Content-Type', 'application/json; charset=utf-8')
-                with urllib.request.urlopen(req, timeout=10) as response:
-                    return response.read().decode('utf-8')
-            except urllib.error.HTTPError as e:
-                last_error = e
-                logger.warning(f"HTTP error {e.code} on attempt {i+1}/{retries+1}: {url}")
-            except urllib.error.URLError as e:
-                last_error = e
-                logger.warning(f"URL error on attempt {i+1}/{retries+1}: {e.reason}")
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Request error on attempt {i+1}/{retries+1}: {e}")
-            
-            if i < retries:
-                time.sleep(2 ** i)  # 指数退避
-        
-        logger.error(f"All retries failed for {url}: {last_error}")
-        return None
-
-    @classmethod
-    def send(cls, config: Dict, type_label: str, body_text: str, 
-             is_voice: bool = True, async_mode: bool = True):
-        cls._ensure_executor()
-        if async_mode:
-            cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
-        else:
-            cls._do_push_logic(config, type_label, body_text, is_voice)
-
-    @classmethod
-    def shutdown(cls):
-        if cls._executor is not None:
-            cls._executor.shutdown(wait=True)
-            cls._executor = None
+ 
 
 
 atexit.register(PushService.shutdown)
@@ -392,11 +133,8 @@ atexit.register(PushService.shutdown)
 class MMDVMMonitor:
     def __init__(self):
         self.last_msg: Dict[str, Any] = {"call": "", "ts": 0}
-        self.last_temp_alert_time: float = 0
-        self.last_temp_check_time: float = 0
+        self.hw = Hardware()
         self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
-        self._cpu_prev_total = None
-        self._cpu_prev_idle = None
         self.last_activity_ts: float = 0.0
         
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
@@ -407,141 +145,16 @@ class MMDVMMonitor:
         
 
     def _cpu_percent_proc(self) -> str:
-        try:
-            with open("/proc/stat", "r") as f:
-                parts = f.readline().split()
-            if not parts or parts[0] != "cpu":
-                return "0"
-            nums = [int(x) for x in parts[1:]]
-            user = nums[0] if len(nums) > 0 else 0
-            nice = nums[1] if len(nums) > 1 else 0
-            system = nums[2] if len(nums) > 2 else 0
-            idle = nums[3] if len(nums) > 3 else 0
-            iowait = nums[4] if len(nums) > 4 else 0
-            irq = nums[5] if len(nums) > 5 else 0
-            softirq = nums[6] if len(nums) > 6 else 0
-            steal = nums[7] if len(nums) > 7 else 0
-            idleall = idle
-            nonidle = user + nice + system + irq + softirq + steal + iowait
-            total = idleall + nonidle
-            prev_total = self._cpu_prev_total
-            prev_idle = self._cpu_prev_idle
-            if prev_total is None or prev_idle is None:
-                import time as _t
-                _t.sleep(1.0)
-                with open("/proc/stat", "r") as f2:
-                    parts2 = f2.readline().split()
-                if not parts2 or parts2[0] != "cpu":
-                    return "0"
-                nums2 = [int(x) for x in parts2[1:]]
-                user2 = nums2[0] if len(nums2) > 0 else 0
-                nice2 = nums2[1] if len(nums2) > 1 else 0
-                system2 = nums2[2] if len(nums2) > 2 else 0
-                idle2 = nums2[3] if len(nums2) > 3 else 0
-                iowait2 = nums2[4] if len(nums2) > 4 else 0
-                irq2 = nums2[5] if len(nums2) > 5 else 0
-                softirq2 = nums2[6] if len(nums2) > 6 else 0
-                steal2 = nums2[7] if len(nums2) > 7 else 0
-                idleall2 = idle2
-                nonidle2 = user2 + nice2 + system2 + irq2 + softirq2 + steal2 + iowait2
-                total2 = idleall2 + nonidle2
-                totald_i = total2 - total
-                idled_i = idleall2 - idleall
-                self._cpu_prev_total = total2
-                self._cpu_prev_idle = idleall2
-                pct_i = 0.0 if totald_i <= 0 else (totald_i - idled_i) * 100.0 / totald_i
-                if pct_i < 0.0:
-                    pct_i = 0.0
-                if pct_i > 100.0:
-                    pct_i = 100.0
-                return f"{pct_i:.1f}"
-            self._cpu_prev_total = total
-            self._cpu_prev_idle = idleall
-            totald = total - prev_total
-            idled = idleall - prev_idle
-            pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
-            if pct < 0.0:
-                pct = 0.0
-            if pct > 100.0:
-                pct = 100.0
-            return f"{pct:.1f}"
-        except Exception:
-            return "0"
+        return self.hw._cpu_percent_proc()
 
     def _cpu_percent_top(self) -> str:
-        try:
-            out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
-            if not out:
-                return self._cpu_percent_proc()
-            # Example: "%Cpu(s):  2.3 us,  4.6 sy,  0.0 ni, 93.1 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st"
-            import re
-            m = re.search(r'(\d+(?:\.\d+)?)\s*id', out)
-            if m:
-                idle = float(m.group(1))
-                busy = max(0.0, min(100.0, 100.0 - idle))
-                return f"{busy:.1f}"
-            # Fallback: sum known components if id not found
-            comps = {}
-            for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
-                m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
-                if m2:
-                    comps[key] = float(m2.group(1))
-            if comps:
-                busy = sum(comps.values())
-                return f"{busy:.1f}"
-            return self._cpu_percent_proc()
-        except Exception:
-            return self._cpu_percent_proc()
+        return self.hw._cpu_percent_top()
 
     def _cpu_percent_process(self, interval: float = 1.0) -> str:
-        try:
-            import time as _t
-            pid = os.getpid()
-            with open("/proc/stat", "r") as f:
-                parts = f.readline().split()
-            if not parts or parts[0] != "cpu":
-                return "0"
-            total1 = sum(int(x) for x in parts[1:])
-            with open(f"/proc/{pid}/stat", "r") as f2:
-                p1 = f2.read().split()
-            if len(p1) < 17:
-                return "0"
-            utime1 = int(p1[13]); stime1 = int(p1[14])
-            _t.sleep(interval)
-            with open("/proc/stat", "r") as f:
-                parts = f.readline().split()
-            if not parts or parts[0] != "cpu":
-                return "0"
-            total2 = sum(int(x) for x in parts[1:])
-            with open(f"/proc/{pid}/stat", "r") as f2:
-                p2 = f2.read().split()
-            if len(p2) < 17:
-                return "0"
-            utime2 = int(p2[13]); stime2 = int(p2[14])
-            delta_proc = (utime2 + stime2) - (utime1 + stime1)
-            delta_total = total2 - total1
-            cpus = os.cpu_count() or 1
-            pct = 0.0 if delta_total <= 0 else (delta_proc * 100.0 / delta_total) * cpus
-            if pct < 0.0:
-                pct = 0.0
-            max_pct = 100.0 * cpus
-            if pct > max_pct:
-                pct = max_pct
-            return f"{pct:.1f}"
-        except Exception:
-            return "0"
+        return self.hw._cpu_percent_process(interval=interval)
 
     def _cpu_percent_process_top(self) -> str:
-        try:
-            pid = os.getpid()
-            val = subprocess.getoutput(f"ps -p {pid} -o %cpu --no-headers").strip()
-            if not val:
-                return self._cpu_percent_process(interval=1.0)
-            # ps already returns normalized percentage compatible with top
-            f = float(val)
-            return f"{f:.1f}"
-        except Exception:
-            return self._cpu_percent_process(interval=1.0)
+        return self.hw._cpu_percent_process_top()
 
     def _proc_mem_rss_kb(self) -> str:
         try:
@@ -556,55 +169,18 @@ class MMDVMMonitor:
             return "0"
 
     def _mem_percent_proc(self) -> str:
-        mt = ma = None
-        with open("/proc/meminfo", "r") as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    mt = float(line.split()[1])
-                elif line.startswith("MemAvailable:"):
-                    ma = float(line.split()[1])
-                if mt is not None and ma is not None:
-                    break
-        if mt and ma:
-            used = (mt - ma) / mt * 100.0
-            return f"{used:.1f}%"
-        return "0%"
+        return self.hw._mem_percent_proc()
 
     def get_sys_info(self) -> Tuple[str, str, str]:
-        try:
-            ip = subprocess.getoutput("hostname -I").split()[0]
-        except (IndexError, Exception):
-            ip = "Unknown"
-        cpu = self._cpu_percent_top()
-        try:
-            mem = self._mem_percent_proc()
-        except Exception:
-            try:
-                mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
-            except Exception:
-                mem = "0%"
-        return ip, cpu, mem
+        return self.hw.get_sys_info()
 
     def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
-        try:
-            with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
-                temp_c = float(f.read().strip()) / 1000.0
-            unit = conf.get('temp_unit', 'C').upper()
-            val = (temp_c * 9/5) + 32 if unit == 'F' else temp_c
-            return f"{val:.1f}°{unit}", val
-        except (FileNotFoundError, ValueError, OSError):
-            return "N/A", 0.0
+        return self.hw.get_current_temp(conf)
 
     def check_temp_alert(self, conf: Dict):
-        now = time.time()
-        if now - self.last_temp_check_time < 60:
-            return
-        self.last_temp_check_time = now
-        display_str, current_val = self.get_current_temp(conf)
-        if should_temp_alert(conf, self.last_temp_alert_time, now, current_val):
-            self.last_temp_alert_time = now
-            threshold = float(conf.get('temp_threshold', 65.0))
-            title, body = format_temp_alert(conf, display_str, threshold)
+        res = self.hw.check_temp_alert(conf)
+        if res:
+            title, body = res
             PushService.send(conf, title, body, is_voice=False)
 
     def get_latest_log(self) -> Optional[str]:
