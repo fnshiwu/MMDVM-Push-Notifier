@@ -11,7 +11,26 @@ class Hardware:
         self.last_temp_check_time: float = 0.0
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
-    def _cpu_percent_proc(self) -> str:
+    def _cpu_percent_top(self) -> str:
+        try:
+            out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
+            if out:
+                import re
+                m = re.search(r'(\d+(?:\.\d+)?)\s*id', out)
+                if m:
+                    idle = float(m.group(1))
+                    busy = max(0.0, min(100.0, 100.0 - idle))
+                    return f"{busy:.1f}"
+                comps = {}
+                for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
+                    m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
+                    if m2:
+                        comps[key] = float(m2.group(1))
+                if comps:
+                    busy = sum(comps.values())
+                    return f"{busy:.1f}"
+        except Exception:
+            pass
         try:
             with open("/proc/stat", "r") as f:
                 parts = f.readline().split()
@@ -72,28 +91,6 @@ class Hardware:
             return f"{pct:.1f}"
         except Exception:
             return "0"
-    def _cpu_percent_top(self) -> str:
-        try:
-            out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
-            if not out:
-                return self._cpu_percent_proc()
-            import re
-            m = re.search(r'(\d+(?:\.\d+)?)\s*id', out)
-            if m:
-                idle = float(m.group(1))
-                busy = max(0.0, min(100.0, 100.0 - idle))
-                return f"{busy:.1f}"
-            comps = {}
-            for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
-                m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
-                if m2:
-                    comps[key] = float(m2.group(1))
-            if comps:
-                busy = sum(comps.values())
-                return f"{busy:.1f}"
-            return self._cpu_percent_proc()
-        except Exception:
-            return self._cpu_percent_proc()
     def _mem_percent_proc(self) -> str:
         mt = ma = None
         with open("/proc/meminfo", "r") as f:
