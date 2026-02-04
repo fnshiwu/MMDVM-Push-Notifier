@@ -19,7 +19,11 @@ function atomic_write($path, $json) {
     $bytes = @file_put_contents($tmp, $json, LOCK_EX);
     if ($bytes === false) return false;
     @chmod($tmp, 0666);
-    return @rename($tmp, $path);
+    if (!@rename($tmp, $path)) return false;
+    $esc = escapeshellarg($path);
+    @shell_exec("sudo /bin/chown mmdvm-push:www-data $esc 2>/dev/null");
+    @shell_exec("sudo /bin/chmod 660 $esc 2>/dev/null");
+    return true;
 }
 
 // Initialize configuration file | 初始化配置文件
