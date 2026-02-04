@@ -6,17 +6,25 @@
 from datetime import datetime
 import time
 import re
+from functools import lru_cache
 
 _SPLIT_RE = re.compile(r'[;；]+')
 _CS_RE = re.compile(r'^[A-Z0-9][A-Z0-9/\-]*$')
+
+@lru_cache(maxsize=256)
+def _parse_list_cached(s: str):
+    items = [item.strip().upper() for item in _SPLIT_RE.split(s) if item.strip()]
+    return tuple(i for i in items if _CS_RE.match(i) and not i.isdigit())
 
 def _parse_list(data):
     if isinstance(data, list):
         data = ";".join(map(str, data))
     if not data or not isinstance(data, str):
-        return []
-    items = [item.strip().upper() for item in re_split(data)]
-    return [i for i in items if _CS_RE.match(i) and not i.isdigit()]
+        return set()
+    s = data.strip()
+    if not s:
+        return set()
+    return set(_parse_list_cached(s))
 
 def re_split(data: str):
     return [s for s in _SPLIT_RE.split(data) if s.strip()]
