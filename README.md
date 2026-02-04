@@ -159,9 +159,7 @@ Configuration changes take effect automatically without restarting the service.
 ⚠️ **Do NOT reinstall for upgrades**
 
 ```bash
-rpi-rw
-cd /home/pi-star/MMDVM-Push-Notifier
-sudo bash update.sh
+curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/update.sh | sudo bash
 ```
 
 ---
