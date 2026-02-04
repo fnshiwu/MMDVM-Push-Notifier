@@ -7,18 +7,19 @@ from datetime import datetime
 import time
 import re
 
+_SPLIT_RE = re.compile(r'[;；]+')
+_CS_RE = re.compile(r'^[A-Z0-9][A-Z0-9/\-]*$')
+
 def _parse_list(data):
     if isinstance(data, list):
         data = ";".join(map(str, data))
     if not data or not isinstance(data, str):
         return []
     items = [item.strip().upper() for item in re_split(data)]
-    cs_pat = re.compile(r'^[A-Z0-9][A-Z0-9/\-]*$')
-    return [i for i in items if cs_pat.match(i) and not i.isdigit()]
+    return [i for i in items if _CS_RE.match(i) and not i.isdigit()]
 
 def re_split(data: str):
-    import re
-    return [s for s in re.split(r'[;；]+', data) if s.strip()]
+    return [s for s in _SPLIT_RE.split(data) if s.strip()]
 
 def quiet_time(conf: dict) -> bool:
     # Check quiet time window; supports cross-day ranges
