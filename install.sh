@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier enhanced installer (v3.1.8) | 强化版安装脚本
+# MMDVM-Push-Notifier enhanced installer (v3.1.7) | 强化版安装脚本
 # Fixes space and path issues | 修复空间与路径问题
 
 if [ "$EUID" -ne 0 ]; then 
@@ -28,7 +28,7 @@ id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-pus
 chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 cd $INSTALL_DIR || { echo "错误: 无法进入目录 $INSTALL_DIR"; exit 1; }
-REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py mmdvm_push.service"
+REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py identity.py hardware.py notifier.py config.py mmdvm_push.service"
 MISSING=""
 for f in $REQ_FILES; do
     [ -f "$f" ] || MISSING="$MISSING $f"
