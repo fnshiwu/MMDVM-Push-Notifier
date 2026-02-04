@@ -73,6 +73,7 @@ class HamInfoManager:
         self.identity = Identity(id_file)
     def get_info(self, callsign: str) -> Dict[str, str]:
         return self.identity.get_info(callsign)
+
 atexit.register(PushService.shutdown)
 
 # =========================
@@ -89,7 +90,8 @@ class MMDVMMonitor:
         ip, cpu, mem = self.get_sys_info()
         temp_str, _ = self.get_current_temp(conf)
         title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
-        PushService.send(conf, title, body, is_voice=False, async_mode=False)        
+        PushService.send(conf, title, body, is_voice=False, async_mode=False)
+        
 
     def _cpu_percent_proc(self) -> str:
         return self.hw._cpu_percent_top()
