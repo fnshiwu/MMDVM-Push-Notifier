@@ -25,7 +25,7 @@ from config import ConfigManager
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.2.8"
+VERSION = "v3.2.9"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -75,6 +75,7 @@ class HamInfoManager:
         return self.identity.get_info(callsign)
 
 atexit.register(PushService.shutdown)
+
 
 # =========================
 # Monitor Logic
@@ -209,6 +210,10 @@ class MMDVMMonitor:
                     if time.time() - last_check > 5:
                         new_log = self.get_latest_log()
                         if new_log and new_log != log_file:
+                            rest = f.read()
+                            if rest:
+                                for line in rest.splitlines():
+                                    self.process_line(line)
                             logger.info(f"切换到新日志: {new_log}")
                             return  # 退出当前循环，让外层重新打开新文件
                         last_check = time.time()
