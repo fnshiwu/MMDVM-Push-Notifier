@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier auto update script (v3.1.7) | 核心全自动更新脚本
+# MMDVM-Push-Notifier auto update script (v3.2.9) | 核心全自动更新脚本
 # Target platforms: Pi-Star / Debian | 适用平台：Pi-Star / Debian
 
 echo "--- 开始执行一键更新流程 ---"
@@ -77,9 +77,17 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /bin/chown mmdvm-push:www-data /etc/mmdvm_push.json
+www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/mmdvm_push.json
 EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
+else
+    # Append missing rules for atomic chown/chmod | 追加缺失的 chown/chmod 规则
+    grep -q "/bin/chown mmdvm-push:www-data /etc/mmdvm_p" "$SUDO_D" || echo "www-data ALL=(ALL) NOPASSWD: /bin/chown mmdvm-push:www-data /etc/mmdvm_push.json" | sudo tee -a "$SUDO_D" >/dev/null
+    grep -q "/bin/chmod 660 /etc/mmdvm_p" "$SUDO_D" || echo "www-data ALL=(ALL) NOPASSWD: /bin/chmod 660 /etc/mmdvm_push.json" | sudo tee -a "$SUDO_D" >/dev/null
+    sudo chmod 440 "$SUDO_D"
+    sudo visudo -cf "$SUDO_D" >/dev/null 2>&1 || sudo rm -f "$SUDO_D"
 fi
 
 # 按你的要求：更新脚本不再处理 Web 管理页软链接与导航，仅专注代码更新与服务重启
