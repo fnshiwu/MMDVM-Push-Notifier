@@ -129,11 +129,7 @@ MMDVM-Push-Notifier/
 ## 🚀 安装方法 | Installation
 
 ```bash
-rpi-rw
-cd /home/pi-star
-git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
-cd MMDVM-Push-Notifier
-sudo bash install.sh
+curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/install.sh | sudo bash
 ```
 
 ---
@@ -181,9 +177,7 @@ python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 ## 🛑 卸载 | Uninstall
 
 ```bash
-rpi-rw
-cd /home/pi-star/MMDVM-Push-Notifier
-sudo bash uninstall.sh
+curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/uninstall.sh | sudo bash
 ```
 
 ---
