@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier auto update script (v3.1.8) | 核心全自动更新脚本
+# MMDVM-Push-Notifier auto update script (v3.1.7) | 核心全自动更新脚本
 # Target platforms: Pi-Star / Debian | 适用平台：Pi-Star / Debian
 
 echo "--- 开始执行一键更新流程 ---"
@@ -23,7 +23,7 @@ sudo git fetch --all
 sudo git reset --hard origin/main
 
 # Core files integrity check | 核心文件完整性检查
-REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py mmdvm_push.service"
+REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py identity.py hardware.py notifier.py config.py mmdvm_push.service"
 MISSING=""
 for f in $REQ_FILES; do
     [ -f "$f" ] || MISSING="$MISSING $f"
@@ -81,6 +81,8 @@ EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
 fi
+
+# 按你的要求：更新脚本不再处理 Web 管理页软链接与导航，仅专注代码更新与服务重启
 
 # 8) Read actual version from core script | 读取核心脚本版本
 # Fallback to preset if execution fails | 执行失败则回退预设
