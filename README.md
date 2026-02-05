@@ -129,7 +129,11 @@ MMDVM-Push-Notifier/
 ## 🚀 安装方法 | Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/install.sh | sudo bash
+rpi-rw
+cd /home/pi-star
+git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
+cd MMDVM-Push-Notifier
+sudo bash install.sh
 ```
 
 ---
@@ -159,7 +163,9 @@ Configuration changes take effect automatically without restarting the service.
 ⚠️ **Do NOT reinstall for upgrades**
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/update.sh | sudo bash
+rpi-rw
+cd /home/pi-star/MMDVM-Push-Notifier
+sudo bash update.sh
 ```
 
 ---
