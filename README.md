@@ -175,7 +175,9 @@ python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 ## 🛑 卸载 | Uninstall
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/fnshiwu/MMDVM-Push-Notifier/main/uninstall.sh | sudo bash
+rpi-rw
+cd /home/pi-star/MMDVM-Push-Notifier
+sudo bash uninstall.sh
 ```
 
 ---
