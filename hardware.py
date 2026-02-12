@@ -28,17 +28,29 @@ class Hardware:
             return self._cached_cpu
 
         try:
-            out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
+            result = subprocess.run(
+                ["top", "-bn1"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False
+            )
+            out = result.stdout
             if out:
                 import re
+                # Search for Cpu(s) line
+                for line in out.splitlines():
+                    if 'Cpu(s)' in line or 'cpu(s)' in line.lower():
+                        out = line
+                        break
                 m = re.search(r'(\d+(?:\.\d+)?)\s*id', out)
                 if m:
                     idle = float(m.group(1))
                     busy = max(0.0, min(100.0, 100.0 - idle))
-                    result = f"{busy:.1f}"
+                    result_str = f"{busy:.1f}"
                     self._last_cpu_read = now
-                    self._cached_cpu = result
-                    return result
+                    self._cached_cpu = result_str
+                    return result_str
                 comps = {}
                 for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
                     m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
@@ -46,10 +58,10 @@ class Hardware:
                         comps[key] = float(m2.group(1))
                 if comps:
                     busy = sum(comps.values())
-                    result = f"{busy:.1f}"
+                    result_str = f"{busy:.1f}"
                     self._last_cpu_read = now
-                    self._cached_cpu = result
-                    return result
+                    self._cached_cpu = result_str
+                    return result_str
         except Exception:
             pass
         try:
@@ -187,7 +199,14 @@ class Hardware:
         """
         try:
             pid = os.getpid()
-            val = subprocess.getoutput(f"ps -p {pid} -o %cpu --no-headers").strip()
+            result = subprocess.run(
+                ["ps", "-p", str(pid), "-o", "%cpu", "--no-headers"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False
+            )
+            val = result.stdout.strip()
             if not val:
                 return self._cpu_percent_process(interval=1.0)
             f = float(val)
@@ -204,7 +223,14 @@ class Hardware:
             Tuple of (ip, cpu_percent, mem_percent)
         """
         try:
-            ip = subprocess.getoutput("hostname -I").split()[0]
+            result = subprocess.run(
+                ["hostname", "-I"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                check=False
+            )
+            ip = result.stdout.split()[0]
         except (IndexError, Exception):
             ip = "Unknown"
         cpu = self._cpu_percent_top()

@@ -106,6 +106,8 @@ class PushService:
             cls._do_push_logic(config, type_label, body_text, is_voice)
     @classmethod
     def shutdown(cls):
-        if cls._executor is not None:
-            cls._executor.shutdown(wait=True)
-            cls._executor = None
+        with cls._executor_lock:
+            if cls._executor is not None:
+                cls._executor.shutdown(wait=True)
+                cls._executor = None
+                logging.getLogger(__name__).info("ThreadPoolExecutor shutdown complete")

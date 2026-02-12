@@ -202,12 +202,20 @@ class MMDVMMonitor:
 
     def _tail_log(self, log_file: str):
         """持续读取日志文件"""
+        max_iterations = 100000  # 防止无限循环
+        iteration_count = 0
+
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
                 f.seek(0, 2)  # 移到文件末尾
                 last_check = time.time()
-                
+
                 while True:
+                    iteration_count += 1
+                    if iteration_count > max_iterations:
+                        logger.warning(f"达到最大迭代次数 {max_iterations}，重启日志监控")
+                        return
+
                     # 定期检查是否有新日志文件
                     if time.time() - last_check > 5:
                         new_log = self.get_latest_log()
@@ -219,7 +227,7 @@ class MMDVMMonitor:
                             logger.info(f"切换到新日志: {new_log}")
                             return  # 退出当前循环，让外层重新打开新文件
                         last_check = time.time()
-                    
+
                     line = f.readline()
                     if not line:
                         # 根据活跃度动态调整轮询间隔
@@ -232,9 +240,9 @@ class MMDVMMonitor:
                             interval = 1.0  # 长时间无活动
                         time.sleep(interval)
                         continue
-                    
+
                     self.process_line(line)
-                    
+
         except FileNotFoundError:
             logger.warning(f"日志文件不存在: {log_file}")
         except PermissionError:

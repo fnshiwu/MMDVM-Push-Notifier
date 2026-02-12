@@ -119,20 +119,21 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
 def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
 
-    lock_acquired = _io_lock.acquire(timeout=2)
-    if not lock_acquired:
+    if not _io_lock.acquire(timeout=2):
         logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")
         return default_result
 
     try:
         file_size = os.path.getsize(id_file)
         if file_size == 0:
+            _io_lock.release()
             return default_result
         with open(id_file, "rb") as f:
             with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 query = f",{callsign},".encode("utf-8")
                 idx = mm.find(query)
                 if idx == -1:
+                    _io_lock.release()
                     return default_result
                 start = mm.rfind(b"\n", 0, idx) + 1
                 end = mm.find(b"\n", idx)
@@ -142,7 +143,7 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 try:
                     line = line_bytes.decode("utf-8")
                 except UnicodeDecodeError:
-                    line = line_bytes.decode("gb18030", errors="ignore")
+                    line = line_bytes.decode("gb18030", errors="replace")
                 parts = line.split(",")
                 first_name = parts[2].strip() if len(parts) > 2 else ""
                 last_name = parts[3].strip() if len(parts) > 3 else ""
@@ -152,12 +153,16 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 loc_en, loc_cn = resolve_loc(city, state, country)
                 full_name = f"{first_name} {last_name}".strip().upper()
                 name_part = f" ({full_name})" if full_name else ""
+                _io_lock.release()
                 return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
     except (OSError, ValueError) as e:
         logging.getLogger(__name__).debug(f"Lookup error for {callsign}: {e}")
-        return default_result
-    finally:
         _io_lock.release()
+        return default_result
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Unexpected error in lookup for {callsign}: {e}")
+        _io_lock.release()
+        return default_result
 
 class Identity:
     def __init__(self, id_file: str):
