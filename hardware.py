@@ -58,7 +58,6 @@ class Hardware:
             )
             out = result.stdout
             if out:
-                import re
                 # Search for Cpu(s) line
                 for line in out.splitlines():
                     if 'Cpu(s)' in line or 'cpu(s)' in line.lower():
