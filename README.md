@@ -149,10 +149,8 @@ sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 
 ### 健康检查 | Health Check
 ```bash
-python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
+sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
 ```
-无需 sudo，输出系统状态 JSON
-No sudo required, outputs system status in JSON
 
 ### 一键诊断 | Quick Diagnostics
 ```bash
