@@ -82,8 +82,6 @@ class MMDVMMonitor:
         self.identity = Identity(LOCAL_ID_FILE)
         self.last_activity_ts: float = 0.0
         self._last_temp_check: float = 0.0  # 温度检查时间戳
-        self._cached_date = None  # 日志日期缓存
-        self._today_log = None    # 今日日志路径缓存
 
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
         ip, cpu, mem = self.hw.get_sys_info()
@@ -112,16 +110,20 @@ class MMDVMMonitor:
 
     def get_latest_log(self) -> Optional[str]:
         try:
-            # 缓存今天的日期，避免每次都格式化
-            today_date = datetime.now().date()
-            if self._cached_date != today_date:
-                self._cached_date = today_date
-                self._today_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{today_date}.log")
+            # 优先尝试 UTC 时间（Pi-Star 默认使用 UTC 创建日志文件）
+            utc_date = datetime.utcnow().date()
+            utc_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{utc_date}.log")
+            if os.path.exists(utc_log) and os.path.getsize(utc_log) > 0:
+                return utc_log
 
-            if os.path.exists(self._today_log) and os.path.getsize(self._today_log) > 0:
-                return self._today_log
+            # Fallback 1: 尝试本地时间（兼容非标准配置）
+            local_date = datetime.now().date()
+            if local_date != utc_date:  # 避免重复检查
+                local_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{local_date}.log")
+                if os.path.exists(local_log) and os.path.getsize(local_log) > 0:
+                    return local_log
 
-            # 只有今天的日志不存在时才 glob
+            # Fallback 2: glob 查找最新文件（最后的保险）
             log_files = [
                 f for f in glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
                 if os.path.isfile(f) and os.path.getsize(f) > 0
