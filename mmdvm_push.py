@@ -327,7 +327,14 @@ if __name__ == "__main__":
         PushService.send(conf, title, test_body, is_voice=False, async_mode=False)
         print("Success")
     elif len(sys.argv) > 1 and sys.argv[1] == "--health":
-        conf = ConfigManager.get_config()
+        # Health check mode - gracefully handle permission errors
+        try:
+            conf = ConfigManager.get_config()
+            config_valid = isinstance(conf, dict) and len(conf) > 0
+        except Exception:
+            conf = {}
+            config_valid = False
+
         mon = MMDVMMonitor()
         ip, cpu_sys, mem_sys = mon.hw.get_sys_info()
         cpu_proc = mon.hw._cpu_percent_process_top()
@@ -339,7 +346,8 @@ if __name__ == "__main__":
             "mmdvm_log_dir": MMDVM_LOG_DIR,
             "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
             "config_exists": os.path.exists(CONFIG_FILE),
-            "config_valid": isinstance(conf, dict) and len(conf) > 0,
+            "config_valid": config_valid,
+            "config_readable": os.access(CONFIG_FILE, os.R_OK) if os.path.exists(CONFIG_FILE) else False,
             "ip": ip,
             "cpu_system": f"{cpu_sys}%",
             "cpu_process": f"{cpu_proc}%",
