@@ -1,64 +1,113 @@
-import os
-import mmap
-import logging
-from functools import lru_cache
-from threading import Semaphore
-from typing import Dict
-from notify_fmt import resolve_loc
+# Push message formatter | 推送消息格式化器
+#
+# Formats bilingual titles and body for voice/data events
+# 为语音/数据事件生成中英文标题与内容
+from datetime import datetime
+from typing import TYPE_CHECKING
 
-_io_lock = Semaphore(4)
+# Avoid circular import at runtime
+if TYPE_CHECKING:
+    from identity import resolve_loc
 
-@lru_cache(maxsize=4096)
-def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
-    default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
-    try:
-        if not os.path.exists(id_file):
-            return default_result
-        if not _io_lock.acquire(timeout=2):
-            logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")
-            return default_result
-        try:
-            file_size = os.path.getsize(id_file)
-            if file_size == 0:
-                return default_result
-            with open(id_file, "rb") as f:
-                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    query = f",{callsign},".encode("utf-8")
-                    idx = mm.find(query)
-                    if idx == -1:
-                        return default_result
-                    start = mm.rfind(b"\n", 0, idx) + 1
-                    end = mm.find(b"\n", idx)
-                    if end == -1:
-                        end = len(mm)
-                    line_bytes = mm[start:end]
-                    try:
-                        line = line_bytes.decode("utf-8")
-                    except UnicodeDecodeError:
-                        line = line_bytes.decode("gb18030", errors="ignore")
-                    parts = line.split(",")
-                    first_name = parts[2].strip() if len(parts) > 2 else ""
-                    last_name = parts[3].strip() if len(parts) > 3 else ""
-                    city = parts[4].strip().title() if len(parts) > 4 else ""
-                    state = parts[5].strip().upper() if len(parts) > 5 else ""
-                    country = parts[6].strip() if len(parts) > 6 else ""
-                    loc_en, loc_cn = resolve_loc(city, state, country)
-                    full_name = f"{first_name} {last_name}".strip().upper()
-                    name_part = f" ({full_name})" if full_name else ""
-                    return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
-        except (OSError, ValueError) as e:
-            logging.getLogger(__name__).debug(f"Lookup error for {callsign}: {e}")
-            return default_result
-        finally:
-            try:
-                _io_lock.release()
-            except Exception:
-                pass
-    except Exception:
-        return default_result
-
-class Identity:
-    def __init__(self, id_file: str):
-        self.id_file = id_file
-    def get_info(self, callsign: str) -> Dict[str, str]:
-        return _lookup(self.id_file, callsign)
+def format_message(conf: dict, event: dict, temp_str: str, info: dict):
+    # Build type label and body text according to UI language
+    # 根据界面语言生成类型标签与正文
+    lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+    call = event['call']
+    target = event['target']
+    dur = event['dur']
+    loss = event['loss']
+    ber = event['ber']
+    slot = event['slot']
+    loc_en = info.get('loc_en', info.get('loc', ''))
+    loc_cn = info.get('loc_cn', info.get('loc', ''))
+    if lang == 'en':
+        body = (
+            f"👤 <b>Callsign</b>: {call}{info.get('name','')}\n"
+            f"👥 <b>Talkgroup</b>: {target}\n"
+            f"📍 <b>Location</b>: {loc_en}\n"
+            f"📅 <b>Date</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
+            f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"⏳ <b>Duration</b>: {dur}s\n"
+            f"📦 <b>Loss</b>: {loss}%\n"
+            f"📉 <b>BER</b>: {ber}%\n"
+            f"🌡️ <b>Temp</b>: {temp_str}"
+        )
+        type_label = f"{'🎙️ Voice QSO' if event['is_voice'] else '💾 Data Mode'}{slot}"
+    else:
+        body = (
+            f"👤 <b>呼号</b>: {call}{info.get('name','')}\n"
+            f"👥 <b>群组</b>: {target}\n"
+            f"📍 <b>地区</b>: {loc_cn}\n"
+            f"📅 <b>日期</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
+            f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"⏳ <b>时长</b>: {dur}秒\n"
+            f"📦 <b>丢失</b>: {loss}%\n"
+            f"📉 <b>误码</b>: {ber}%\n"
+            f"🌡️ <b>温度</b>: {temp_str}"
+        )
+        type_label = f"{'🎙️ 语音通联' if event['is_voice'] else '💾 数据模式'}{slot}"
+    return type_label, body
+def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: str, mem: str, network_ok: bool):
+    lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+    if lang == 'en':
+        status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
+        body = (
+            f"🚀 <b>Device Online</b> ({version})\n"
+            f"🌐 <b>Network</b>: {status}\n"
+            f"🛠️ <b>Admin IP</b>: {ip}\n"
+            f"🌡️ <b>System Temp</b>: {temp_str}\n"
+            f"📊 <b>CPU</b>: {cpu}%\n"
+            f"💾 <b>Memory</b>: {mem}\n"
+            f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        return "⚙️ Boot Notice", body
+    status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
+    body = (
+        f"🚀 <b>设备已上线</b> ({version})\n"
+        f"🌐 <b>网络状态</b>: {status}\n"
+        f"🛠️ <b>管理IP</b>: {ip}\n"
+        f"🌡️ <b>系统温度</b>: {temp_str}\n"
+        f"📊 <b>CPU占用</b>: {cpu}%\n"
+        f"💾 <b>内存占用</b>: {mem}\n"
+        f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    return "⚙️ 系统启动通知", body
+def format_temp_alert(conf: dict, display_str: str, threshold: float):
+    lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+    if lang == 'en':
+        body = (
+            f"🚨 <b>High Temperature Alert</b>\n"
+            f"🔥 <b>Current Temp</b>: {display_str}\n"
+            f"⚠️ <b>Threshold</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
+            f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
+        )
+        return "🌡️ Hardware Status Warning", body
+    body = (
+        f"🚨 <b>硬件高温预警</b>\n"
+        f"🔥 <b>当前温度</b>: {display_str}\n"
+        f"⚠️ <b>预警阈值</b>: {threshold:.1f}°{conf.get('temp_unit', 'C')}\n"
+        f"⏰ <b>检测时间</b>: {datetime.now().strftime('%H:%M:%S')}"
+    )
+    return "🌡️ 硬件状态警告", body
+def format_test_push(conf: dict, version: str, ip: str, temp_str: str, cpu: str, mem: str):
+    lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+    if lang == 'en':
+        body = (
+            f"Channel test success ({version})\n"
+            f"🌐 <b>IP</b>: {ip}\n"
+            f"🌡️ <b>Temp</b>: {temp_str}\n"
+            f"📊 <b>CPU (System)</b>: {cpu}%\n"
+            f"💾 <b>Memory</b>: {mem}\n"
+            f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}"
+        )
+        return "🔔 Test Notification", body
+    body = (
+        f"通道测试成功 ({version})\n"
+        f"🌐 <b>IP</b>: {ip}\n"
+        f"🌡️ <b>温度</b>: {temp_str}\n"
+        f"📊 <b>CPU（整机）</b>: {cpu}%\n"
+        f"💾 <b>内存</b>: {mem}\n"
+        f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}"
+    )
+    return "🔔 测试推送", body
