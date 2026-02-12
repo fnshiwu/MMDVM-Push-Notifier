@@ -106,7 +106,15 @@ geo_map_en = {
 
 def resolve_loc(city: str, state: str, country: str) -> Tuple[str, str]:
     """Resolve location to bilingual format | 解析地理位置为双语格式"""
-    if any('\u4e00' <= c <= '\u9fff' for c in country):
+    # MEDIUM #4 fix: More robust Chinese character detection
+    def contains_chinese(text: str) -> bool:
+        """Check if text contains Chinese characters"""
+        for char in text:
+            if '\u4e00' <= char <= '\u9fff' or '\u3400' <= char <= '\u4dbf' or '\uf900' <= char <= '\ufaff':
+                return True
+        return False
+
+    if contains_chinese(country):
         # Country name is in Chinese, reverse lookup
         for k, v in geo_map_cn.items():
             if country == v:

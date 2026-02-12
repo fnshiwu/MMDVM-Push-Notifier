@@ -6,6 +6,7 @@
 from datetime import datetime
 import time
 import re
+import logging
 from functools import lru_cache
 
 _SPLIT_RE = re.compile(r'[;；]+')
@@ -58,7 +59,6 @@ def quiet_time(conf: dict) -> bool:
 
     # Validate time formats
     if not _validate_time(start) or not _validate_time(end):
-        import logging
         logging.getLogger(__name__).warning(f"Invalid quiet time format: start={start}, end={end}")
         return False
 

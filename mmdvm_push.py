@@ -31,12 +31,12 @@ VERSION = "v3.3.0"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
-LOG_POLL_INTERVAL = 0.2
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
 MEMORY_CHECK_INTERVAL = 3600  # 内存检查间隔（秒）
 MEMORY_THRESHOLD_KB = 100000  # 内存阈值（KB）
 MAX_LOG_ITERATIONS = 100000  # 日志循环最大迭代次数
+SECONDS_PER_HOUR = 3600  # 一小时的秒数
 
 # 版本查询快速返回，避免初始化日志等产生额外输出
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
@@ -233,7 +233,7 @@ class MMDVMMonitor:
 
                 while True:
                     # MEDIUM #8 fix: Reset counter every hour BEFORE incrementing
-                    if time.time() - start_time >= 3600:
+                    if time.time() - start_time >= SECONDS_PER_HOUR:
                         iteration_count = 0
                         start_time = time.time()
                         logger.info(f"Iteration counter reset for active log: {log_file}")
@@ -355,8 +355,16 @@ if __name__ == "__main__":
         start_t = time.time()
         for i in range(10):
             try:
-                ip_output = subprocess.getoutput("hostname -I").strip()
-                _ip = ip_output.split()[0] if ip_output else ""
+                # HIGH #1 fix: Use subprocess.run() instead of getoutput()
+                result = subprocess.run(
+                    ["hostname", "-I"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False
+                )
+                ip_parts = result.stdout.strip().split() if result.returncode == 0 else []
+                _ip = ip_parts[0] if ip_parts else ""
             except Exception:
                 _ip = ""
             if os.path.exists(MMDVM_LOG_DIR) and _ip:

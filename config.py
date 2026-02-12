@@ -84,13 +84,10 @@ class ConfigManager:
         return conf
     @classmethod
     def get_config(cls, path: str = "/etc/mmdvm_push.json") -> Dict:
-        """Get configuration with thread-safe reload (HIGH #5 fix: protect fast path)"""
+        """Get configuration with thread-safe reload (HIGH #5 fix)"""
         now = time.time()
 
-        # Fast path: check if reload needed (lock-free read is safe for time comparison)
-        # Note: Reading _last_check_time without lock is acceptable here because:
-        # 1. time.time() is monotonic, worst case is unnecessary lock acquisition
-        # 2. _config dict is immutable after assignment (replaced atomically, not mutated)
+        # MEDIUM #3 fix: Always acquire lock for thread safety
         with cls._lock:
             # Check under lock to avoid redundant reads
             if now - cls._last_check_time < cls._check_interval:

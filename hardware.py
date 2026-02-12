@@ -15,6 +15,7 @@ CPU_CACHE_TIMEOUT = 3.0  # CPU 缓存超时（秒）
 TEMP_MIN_CELSIUS = -50.0  # 最低温度（摄氏度）
 TEMP_MAX_CELSIUS = 150.0  # 最高温度（摄氏度）
 SUBPROCESS_TIMEOUT = 5  # 子进程超时（秒）
+SECONDS_PER_DAY = 86400  # 一天的秒数
 
 
 class Hardware:
@@ -29,7 +30,7 @@ class Hardware:
 
     def _reset_cpu_cache_if_needed(self):
         """Reset CPU cache after 24 hours to prevent overflow (MEDIUM #12 fix)"""
-        if time.time() - self._cache_start_time > 86400:
+        if time.time() - self._cache_start_time > SECONDS_PER_DAY:
             self._cpu_prev_total = None
             self._cpu_prev_idle = None
             self._last_cpu_read = 0.0
@@ -115,10 +116,10 @@ class Hardware:
         irq = nums[5] if len(nums) > 5 else 0
         softirq = nums[6] if len(nums) > 6 else 0
         steal = nums[7] if len(nums) > 7 else 0
-        idleall = idle
+        idle_all = idle
         nonidle = user + nice + system + irq + softirq + steal + iowait
-        total = idleall + nonidle
-        return total, idleall
+        total = idle_all + nonidle
+        return total, idle_all
 
     def _cpu_from_proc_stat(self) -> str:
         """
@@ -132,7 +133,7 @@ class Hardware:
 
         with open("/proc/stat", "r") as f:
             parts = f.readline().split()
-        total, idleall = self._parse_proc_stat_line(parts)
+        total, idle_all = self._parse_proc_stat_line(parts)
         if total == 0:
             return "0"
 
@@ -144,14 +145,14 @@ class Hardware:
             time.sleep(1.0)
             with open("/proc/stat", "r") as f2:
                 parts2 = f2.readline().split()
-            total2, idleall2 = self._parse_proc_stat_line(parts2)
+            total2, idle_all2 = self._parse_proc_stat_line(parts2)
             if total2 == 0:
                 return "0"
 
             totald_i = total2 - total
-            idled_i = idleall2 - idleall
+            idled_i = idle_all2 - idle_all
             self._cpu_prev_total = total2
-            self._cpu_prev_idle = idleall2
+            self._cpu_prev_idle = idle_all2
             pct_i = 0.0 if totald_i <= 0 else (totald_i - idled_i) * 100.0 / totald_i
             pct_i = max(0.0, min(100.0, pct_i))
             result = f"{pct_i:.1f}"
@@ -161,9 +162,9 @@ class Hardware:
 
         # Use cached previous values
         self._cpu_prev_total = total
-        self._cpu_prev_idle = idleall
+        self._cpu_prev_idle = idle_all
         totald = total - prev_total
-        idled = idleall - prev_idle
+        idled = idle_all - prev_idle
         pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
         pct = max(0.0, min(100.0, pct))
         result = f"{pct:.1f}"
@@ -199,7 +200,6 @@ class Hardware:
         通过读取 /proc/stat 获取进程 CPU 占用率
         """
         try:
-            import time as _t
             pid = os.getpid()
             with open("/proc/stat", "r") as f:
                 parts = f.readline().split()
@@ -211,7 +211,7 @@ class Hardware:
             if len(p1) < 17:
                 return "0"
             utime1 = int(p1[13]); stime1 = int(p1[14])
-            _t.sleep(interval)
+            time.sleep(interval)
             with open("/proc/stat", "r") as f:
                 parts = f.readline().split()
             if not parts or parts[0] != "cpu":
@@ -253,8 +253,8 @@ class Hardware:
             val = result.stdout.strip()
             if not val:
                 return self._cpu_percent_process(interval=1.0)
-            f = float(val)
-            return f"{f:.1f}"
+            cpu_val = float(val)
+            return f"{cpu_val:.1f}"
         except Exception as e:
             logging.getLogger(__name__).debug(f"ps command failed: {e}")
             return self._cpu_percent_process(interval=1.0)
@@ -286,7 +286,15 @@ class Hardware:
         except Exception as e:
             logging.getLogger(__name__).debug(f"Memory read from /proc failed: {e}")
             try:
-                mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
+                # MEDIUM #2 fix: Use subprocess.run() instead of getoutput()
+                result = subprocess.run(
+                    ["sh", "-c", "free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'"],
+                    capture_output=True,
+                    text=True,
+                    timeout=SUBPROCESS_TIMEOUT,
+                    check=False
+                )
+                mem = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "0%"
             except Exception as e2:
                 logging.getLogger(__name__).debug(f"Memory read from free failed: {e2}")
                 mem = "0%"
