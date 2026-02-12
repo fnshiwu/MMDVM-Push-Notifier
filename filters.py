@@ -26,9 +26,6 @@ def _parse_list(data):
         return set()
     return set(_parse_list_cached(s))
 
-def re_split(data: str):
-    return [s for s in _SPLIT_RE.split(data) if s.strip()]
-
 def quiet_time(conf: dict) -> bool:
     # Check quiet time window; supports cross-day ranges
     # 检查静音时段窗口；支持跨天时间范围
