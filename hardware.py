@@ -1,17 +1,24 @@
+# Hardware metrics module | 硬件指标模块
+#
+# Reads system metrics: CPU, memory, temperature
+# 读取系统指标：CPU、内存、温度
+
 import os
-import time
 import subprocess
-from typing import Tuple, Optional, Dict
-from notify_fmt import format_temp_alert
-from filters import should_temp_alert
+from typing import Tuple, Dict
+
 
 class Hardware:
+    """System hardware metrics reader | 系统硬件指标读取器"""
+
     def __init__(self):
-        self.last_temp_alert_time: float = 0.0
-        self.last_temp_check_time: float = 0.0
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
     def _cpu_percent_top(self) -> str:
+        """
+        Get system CPU usage using top command
+        使用 top 命令获取系统 CPU 占用率
+        """
         try:
             out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
             if out:
@@ -91,7 +98,12 @@ class Hardware:
             return f"{pct:.1f}"
         except Exception:
             return "0"
+
     def _mem_percent_proc(self) -> str:
+        """
+        Get memory usage from /proc/meminfo
+        从 /proc/meminfo 获取内存占用率
+        """
         mt = ma = None
         with open("/proc/meminfo", "r") as f:
             for line in f:
@@ -105,7 +117,12 @@ class Hardware:
             used = (mt - ma) / mt * 100.0
             return f"{used:.1f}%"
         return "0%"
+
     def _cpu_percent_process(self, interval: float = 1.0) -> str:
+        """
+        Get process CPU usage by reading /proc/stat
+        通过读取 /proc/stat 获取进程 CPU 占用率
+        """
         try:
             import time as _t
             pid = os.getpid()
@@ -142,7 +159,12 @@ class Hardware:
             return f"{pct:.1f}"
         except Exception:
             return "0"
+
     def _cpu_percent_process_top(self) -> str:
+        """
+        Get process CPU usage using ps command
+        使用 ps 命令获取进程 CPU 占用率
+        """
         try:
             pid = os.getpid()
             val = subprocess.getoutput(f"ps -p {pid} -o %cpu --no-headers").strip()
@@ -152,7 +174,15 @@ class Hardware:
             return f"{f:.1f}"
         except Exception:
             return self._cpu_percent_process(interval=1.0)
+
     def get_sys_info(self) -> Tuple[str, str, str]:
+        """
+        Get system information: IP, CPU, memory
+        获取系统信息：IP、CPU、内存
+
+        Returns:
+            Tuple of (ip, cpu_percent, mem_percent)
+        """
         try:
             ip = subprocess.getoutput("hostname -I").split()[0]
         except (IndexError, Exception):
@@ -166,7 +196,18 @@ class Hardware:
             except Exception:
                 mem = "0%"
         return ip, cpu, mem
+
     def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
+        """
+        Get current system temperature
+        获取当前系统温度
+
+        Args:
+            conf: Configuration dict with temp_unit setting
+
+        Returns:
+            Tuple of (formatted_string, raw_value)
+        """
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read().strip()) / 1000.0
@@ -175,14 +216,4 @@ class Hardware:
             return f"{val:.1f}°{unit}", val
         except (FileNotFoundError, ValueError, OSError):
             return "N/A", 0.0
-    def check_temp_alert(self, conf: Dict) -> Optional[Tuple[str, str]]:
-        now = time.time()
-        if now - self.last_temp_check_time < 60:
-            return None
-        self.last_temp_check_time = now
-        display_str, current_val = self.get_current_temp(conf)
-        if should_temp_alert(conf, self.last_temp_alert_time, now, current_val):
-            self.last_temp_alert_time = now
-            threshold = float(conf.get("temp_threshold", 65.0))
-            return format_temp_alert(conf, display_str, threshold)
-        return None
+
