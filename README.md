@@ -197,14 +197,6 @@ sudo bash update.sh
 
 ---
 
-## 🧪 测试推送 | Test Notification
-
-```bash
-python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
-```
-
----
-
 ## 🛑 卸载 | Uninstall
 
 ```bash
