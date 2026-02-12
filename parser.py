@@ -26,7 +26,9 @@ def parse_line(line: str):
     target = m.group('target').strip()
     try:
         dur = float(m.group('dur'))
-    except Exception:
+    except (ValueError, TypeError) as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to parse duration '{m.group('dur')}': {e}")
         return None
     v_type = m.group('v_type') or ''
     is_voice = 'data' not in v_type.lower()

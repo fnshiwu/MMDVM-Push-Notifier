@@ -161,10 +161,12 @@ class MMDVMMonitor:
         network_ok = self.check_network()
 
         if conf.get('boot_push_enabled', True):
-            self._send_boot_notice(conf, network_ok)
-            if not network_ok:
-                if self.check_network(max_attempts=30, interval=2):
-                    self._send_boot_notice(conf, True)
+            if network_ok:
+                self._send_boot_notice(conf, True)
+            else:
+                # 网络不可用，重试一次
+                network_ok_retry = self.check_network(max_attempts=30, interval=2)
+                self._send_boot_notice(conf, network_ok_retry)
 
         logger.info(f"{VERSION} 监控就绪，正在监听日志行...")
 
@@ -303,7 +305,8 @@ if __name__ == "__main__":
         start_t = time.time()
         for i in range(10):
             try:
-                _ip = subprocess.getoutput("hostname -I").split()[0]
+                ip_output = subprocess.getoutput("hostname -I").strip()
+                _ip = ip_output.split()[0] if ip_output else ""
             except Exception:
                 _ip = ""
             if os.path.exists(MMDVM_LOG_DIR) and _ip:

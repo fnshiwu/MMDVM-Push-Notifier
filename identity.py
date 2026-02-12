@@ -110,12 +110,14 @@ def resolve_loc(city: str, state: str, country: str) -> Tuple[str, str]:
 @lru_cache(maxsize=4096)
 def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
+    lock_acquired = False
     try:
         if not os.path.exists(id_file):
             return default_result
         if not _io_lock.acquire(timeout=2):
             logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")
             return default_result
+        lock_acquired = True
         try:
             file_size = os.path.getsize(id_file)
             if file_size == 0:
@@ -149,10 +151,11 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
             logging.getLogger(__name__).debug(f"Lookup error for {callsign}: {e}")
             return default_result
         finally:
-            try:
-                _io_lock.release()
-            except Exception:
-                pass
+            if lock_acquired:
+                try:
+                    _io_lock.release()
+                except Exception:
+                    pass
     except Exception:
         return default_result
 

@@ -21,13 +21,16 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     slot = event['slot']
     loc_en = info.get('loc_en', info.get('loc', ''))
     loc_cn = info.get('loc_cn', info.get('loc', ''))
+    now = datetime.now()
+    date_str = now.strftime('%Y-%m-%d')
+    time_str = now.strftime('%H:%M:%S')
     if lang == 'en':
         body = (
             f"👤 <b>Callsign</b>: {call}{info.get('name','')}\n"
             f"👥 <b>Talkgroup</b>: {target}\n"
             f"📍 <b>Location</b>: {loc_en}\n"
-            f"📅 <b>Date</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"⏰ <b>Time</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"📅 <b>Date</b>: {date_str}\n"
+            f"⏰ <b>Time</b>: {time_str}\n"
             f"⏳ <b>Duration</b>: {dur}s\n"
             f"📦 <b>Loss</b>: {loss}%\n"
             f"📉 <b>BER</b>: {ber}%\n"
@@ -39,8 +42,8 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
             f"👤 <b>呼号</b>: {call}{info.get('name','')}\n"
             f"👥 <b>群组</b>: {target}\n"
             f"📍 <b>地区</b>: {loc_cn}\n"
-            f"📅 <b>日期</b>: {datetime.now().strftime('%Y-%m-%d')}\n"
-            f"⏰ <b>时间</b>: {datetime.now().strftime('%H:%M:%S')}\n"
+            f"📅 <b>日期</b>: {date_str}\n"
+            f"⏰ <b>时间</b>: {time_str}\n"
             f"⏳ <b>时长</b>: {dur}秒\n"
             f"📦 <b>丢失</b>: {loss}%\n"
             f"📉 <b>误码</b>: {ber}%\n"
@@ -50,6 +53,8 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     return type_label, body
 def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: str, mem: str, network_ok: bool):
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
+    now = datetime.now()
+    datetime_str = now.strftime('%Y-%m-%d %H:%M:%S')
     if lang == 'en':
         status = "✅ Online" if network_ok else "⚠️ Packet loss/timeout"
         body = (
@@ -59,7 +64,7 @@ def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: st
             f"🌡️ <b>System Temp</b>: {temp_str}\n"
             f"📊 <b>CPU</b>: {cpu}%\n"
             f"💾 <b>Memory</b>: {mem}\n"
-            f"⏰ <b>Time</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"⏰ <b>Time</b>: {datetime_str}"
         )
         return "⚙️ Boot Notice", body
     status = "✅ 连通" if network_ok else "⚠️ 丢包/超时"
@@ -70,7 +75,7 @@ def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: st
         f"🌡️ <b>系统温度</b>: {temp_str}\n"
         f"📊 <b>CPU占用</b>: {cpu}%\n"
         f"💾 <b>内存占用</b>: {mem}\n"
-        f"⏰ <b>时间</b>: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        f"⏰ <b>时间</b>: {datetime_str}"
     )
     return "⚙️ 系统启动通知", body
 def format_temp_alert(conf: dict, display_str: str, threshold: float):
