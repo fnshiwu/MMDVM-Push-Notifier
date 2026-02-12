@@ -246,10 +246,20 @@ def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
 
 ### 1. 测试环境验证
 ```bash
-# 在 Pi-Star 上测试
-cd /usr/local/sbin
+# 进入项目目录
+cd /home/pi-star/MMDVM-Push-Notifier
+
+# 更新代码
+sudo ./update.sh
+
+# 停止服务
 sudo systemctl stop mmdvm_push
+
+# 测试推送
 sudo python3 mmdvm_push.py --test
+
+# 查看健康状态
+sudo python3 mmdvm_push.py --health
 ```
 
 ### 2. 观察运行状态
@@ -264,15 +274,17 @@ top -p $(pgrep -f mmdvm_push.py)
 ### 3. 健康检查
 ```bash
 # 检查运行状态
-python3 /usr/local/sbin/mmdvm_push.py --health
+cd /home/pi-star/MMDVM-Push-Notifier
+sudo python3 mmdvm_push.py --health
 ```
 
 ### 4. 回滚方案
 如果发现问题，可以从 Git 恢复优化前的版本：
 ```bash
-cd /path/to/MMDVM-Push-Notifier
+cd /home/pi-star/MMDVM-Push-Notifier
 git diff HEAD~1 hardware.py config.py mmdvm_push.py
 git checkout HEAD~1 -- hardware.py config.py mmdvm_push.py
+sudo systemctl restart mmdvm_push
 ```
 
 ---
