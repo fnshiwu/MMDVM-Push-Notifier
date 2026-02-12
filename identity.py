@@ -119,9 +119,6 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
 def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
 
-    if not os.path.exists(id_file):
-        return default_result
-
     lock_acquired = _io_lock.acquire(timeout=2)
     if not lock_acquired:
         logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")

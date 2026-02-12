@@ -3,11 +3,6 @@
 # Formats bilingual titles and body for voice/data events
 # 为语音/数据事件生成中英文标题与内容
 from datetime import datetime
-from typing import TYPE_CHECKING
-
-# Avoid circular import at runtime
-if TYPE_CHECKING:
-    from identity import resolve_loc
 
 def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     # Build type label and body text according to UI language
