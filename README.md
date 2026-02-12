@@ -109,6 +109,7 @@ It monitors `MMDVMHost` logs and sends structured notifications for **voice and 
 ```
 MMDVM-Push-Notifier/
 ├── mmdvm_push.py        # 核心服务入口，日志轮询/推送/健康输出
+├── alerts.py            # 告警管理和触发
 ├── parser.py            # 日志解析（语音/数据、呼号、时长、时隙等）
 ├── identity.py          # 呼号检索与缓存（呼号、姓名、地区等）
 ├── hardware.py          # 系统资源与温度报警（IP、内存，CPU等）
