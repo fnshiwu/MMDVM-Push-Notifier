@@ -286,15 +286,35 @@ class Hardware:
         except Exception as e:
             logging.getLogger(__name__).debug(f"Memory read from /proc failed: {e}")
             try:
-                # MEDIUM #2 fix: Use subprocess.run() instead of getoutput()
+                # SECURITY: Use array form to avoid shell injection
                 result = subprocess.run(
-                    ["sh", "-c", "free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'"],
+                    ["free", "-m"],
                     capture_output=True,
                     text=True,
                     timeout=SUBPROCESS_TIMEOUT,
                     check=False
                 )
-                mem = result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else "0%"
+                if result.returncode == 0 and result.stdout:
+                    # Parse free output manually instead of using awk
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) >= 2:
+                        parts = lines[1].split()
+                        if len(parts) >= 3:
+                            try:
+                                total = float(parts[1])
+                                used = float(parts[2])
+                                if total > 0:
+                                    mem = f"{(used * 100.0 / total):.1f}%"
+                                else:
+                                    mem = "0%"
+                            except (ValueError, ZeroDivisionError):
+                                mem = "0%"
+                        else:
+                            mem = "0%"
+                    else:
+                        mem = "0%"
+                else:
+                    mem = "0%"
             except Exception as e2:
                 logging.getLogger(__name__).debug(f"Memory read from free failed: {e2}")
                 mem = "0%"

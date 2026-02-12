@@ -84,10 +84,18 @@ def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
         return False
     return True
 def should_temp_alert(conf: dict, last_alert_time: float, now: float, current_val: float) -> bool:
+    """
+    Check if temperature alert should be sent
+    检查是否应发送温度告警
+
+    Note: temp_interval is in SECONDS (not minutes)
+    注意：temp_interval 单位是秒（不是分钟）
+    """
     if not conf.get('temp_alert_enabled'):
         return False
     threshold = float(conf.get('temp_threshold', 65.0))
     if current_val < threshold:
         return False
-    interval_sec = int(conf.get('temp_interval', 30)) * 60
+    # CRITICAL fix: temp_interval is already in seconds, don't multiply by 60
+    interval_sec = int(conf.get('temp_interval', 30))
     return (now - last_alert_time) > interval_sec

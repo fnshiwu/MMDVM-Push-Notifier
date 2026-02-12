@@ -54,7 +54,7 @@ class ConfigManager:
             "boot_push_enabled": True,
             "temp_alert_enabled": True,
             "temp_threshold": 65.0,
-            "temp_interval": 30,
+            "temp_interval": 30,  # Temperature check interval in SECONDS (温度检查间隔，单位：秒)
             "temp_unit": "C",
             "ignore_list": "", "focus_list": "", "ui_lang": "cn"
         }
