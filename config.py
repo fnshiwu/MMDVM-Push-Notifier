@@ -8,7 +8,7 @@ from typing import Dict
 class ConfigManager:
     _config: Dict = {}
     _last_mtime: float = 0.0
-    _check_interval: int = 5
+    _check_interval: int = 30  # 从5秒优化为30秒
     _last_check_time: float = 0.0
     _lock = Lock()
     @classmethod

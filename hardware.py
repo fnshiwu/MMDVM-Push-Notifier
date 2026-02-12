@@ -14,11 +14,19 @@ class Hardware:
     def __init__(self):
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
+        self._last_cpu_read = 0.0  # CPU 缓存时间戳
+        self._cached_cpu = "0"     # CPU 缓存值
     def _cpu_percent_top(self) -> str:
         """
         Get system CPU usage using top command
         使用 top 命令获取系统 CPU 占用率
         """
+        # 如果距离上次读取不到3秒，直接返回缓存值
+        import time as _time
+        now = _time.time()
+        if now - self._last_cpu_read < 3.0:
+            return self._cached_cpu
+
         try:
             out = subprocess.getoutput("top -bn1 | grep 'Cpu(s)'")
             if out:
@@ -27,7 +35,10 @@ class Hardware:
                 if m:
                     idle = float(m.group(1))
                     busy = max(0.0, min(100.0, 100.0 - idle))
-                    return f"{busy:.1f}"
+                    result = f"{busy:.1f}"
+                    self._last_cpu_read = now
+                    self._cached_cpu = result
+                    return result
                 comps = {}
                 for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
                     m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
@@ -35,7 +46,10 @@ class Hardware:
                         comps[key] = float(m2.group(1))
                 if comps:
                     busy = sum(comps.values())
-                    return f"{busy:.1f}"
+                    result = f"{busy:.1f}"
+                    self._last_cpu_read = now
+                    self._cached_cpu = result
+                    return result
         except Exception:
             pass
         try:
@@ -85,7 +99,10 @@ class Hardware:
                     pct_i = 0.0
                 if pct_i > 100.0:
                     pct_i = 100.0
-                return f"{pct_i:.1f}"
+                result = f"{pct_i:.1f}"
+                self._last_cpu_read = now
+                self._cached_cpu = result
+                return result
             self._cpu_prev_total = total
             self._cpu_prev_idle = idleall
             totald = total - prev_total
@@ -95,9 +112,12 @@ class Hardware:
                 pct = 0.0
             if pct > 100.0:
                 pct = 100.0
-            return f"{pct:.1f}"
+            result = f"{pct:.1f}"
+            self._last_cpu_read = now
+            self._cached_cpu = result
+            return result
         except Exception:
-            return "0"
+            return self._cached_cpu if self._cached_cpu != "0" else "0"
 
     def _mem_percent_proc(self) -> str:
         """

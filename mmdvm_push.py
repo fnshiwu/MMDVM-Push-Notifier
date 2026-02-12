@@ -81,6 +81,9 @@ class MMDVMMonitor:
         self.alerts = AlertManager(self.hw)
         self.identity = Identity(LOCAL_ID_FILE)
         self.last_activity_ts: float = 0.0
+        self._last_temp_check: float = 0.0  # 温度检查时间戳
+        self._cached_date = None  # 日志日期缓存
+        self._today_log = None    # 今日日志路径缓存
 
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
         ip, cpu, mem = self.hw.get_sys_info()
@@ -109,12 +112,16 @@ class MMDVMMonitor:
 
     def get_latest_log(self) -> Optional[str]:
         try:
-            # Optimization: Check today's log first to avoid glob overhead
-            today = datetime.now().strftime("%Y-%m-%d")
-            today_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{today}.log")
-            if os.path.exists(today_log) and os.path.getsize(today_log) > 0:
-                return today_log
+            # 缓存今天的日期，避免每次都格式化
+            today_date = datetime.now().date()
+            if self._cached_date != today_date:
+                self._cached_date = today_date
+                self._today_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{today_date}.log")
 
+            if os.path.exists(self._today_log) and os.path.getsize(self._today_log) > 0:
+                return self._today_log
+
+            # 只有今天的日志不存在时才 glob
             log_files = [
                 f for f in glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
                 if os.path.isfile(f) and os.path.getsize(f) > 0
@@ -126,28 +133,33 @@ class MMDVMMonitor:
     def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
         """检查网络连通性"""
         logger.info("正在进入冷启动网络探测循环...")
-        
+
         for i in range(max_attempts):
             try:
+                # 先快速检查 IP，避免不必要的网络请求
                 ip_check = subprocess.getoutput("hostname -I").strip()
-                if ip_check and not ip_check.startswith("127."):
-                    urllib.request.urlopen(
-                        "http://www.apple.com/library/test/success.html",
-                        timeout=3
-                    )
-                    logger.info(f"网络就绪 (尝试 {i+1})")
-                    return True
+                if not ip_check or ip_check.startswith("127."):
+                    time.sleep(interval)
+                    continue
+
+                # 只有 IP 正常才进行网络连通性测试
+                urllib.request.urlopen(
+                    "http://www.apple.com/library/test/success.html",
+                    timeout=3
+                )
+                logger.info(f"网络就绪 (尝试 {i+1})")
+                return True
             except Exception:
                 pass
             time.sleep(interval)
-        
+
         logger.warning("网络探测超时")
         return False
 
     def run(self):
         conf = ConfigManager.get_config()
         network_ok = self.check_network()
-        
+
         if conf.get('boot_push_enabled', True):
             self._send_boot_notice(conf, network_ok)
             if not network_ok:
@@ -155,16 +167,28 @@ class MMDVMMonitor:
                     self._send_boot_notice(conf, True)
 
         logger.info(f"{VERSION} 监控就绪，正在监听日志行...")
-        
+
+        # 内存监控
+        last_mem_check = time.time()
+
         while True:
             try:
+                # 每小时检查一次内存
+                if time.time() - last_mem_check > 3600:
+                    rss_kb = int(self._proc_mem_rss_kb())
+                    if rss_kb > 100000:  # 超过100MB
+                        logger.warning(f"内存占用过高: {rss_kb}KB，建议重启服务")
+                    else:
+                        logger.info(f"内存占用正常: {rss_kb}KB")
+                    last_mem_check = time.time()
+
                 current_log = self.get_latest_log()
                 if not current_log:
                     time.sleep(5)
                     continue
-                
+
                 self._tail_log(current_log)
-                
+
             except KeyboardInterrupt:
                 logger.info("收到中断信号，正在退出...")
                 break
@@ -194,7 +218,14 @@ class MMDVMMonitor:
                     
                     line = f.readline()
                     if not line:
-                        interval = 0.2 if (time.time() - self.last_activity_ts) < 60 else 0.8
+                        # 根据活跃度动态调整轮询间隔
+                        idle_time = time.time() - self.last_activity_ts
+                        if idle_time < 60:
+                            interval = 0.3  # 1分钟内活跃
+                        elif idle_time < 300:
+                            interval = 0.5  # 5分钟内
+                        else:
+                            interval = 1.0  # 长时间无活动
                         time.sleep(interval)
                         continue
                     
@@ -210,7 +241,13 @@ class MMDVMMonitor:
         if not event:
             return
         conf = ConfigManager.get_config()
-        self.check_temp_alert(conf)
+
+        # 只在有活动时每30秒检查一次温度，而不是每行都检查
+        now = time.time()
+        if now - self._last_temp_check > 30:
+            self.check_temp_alert(conf)
+            self._last_temp_check = now
+
         if quiet_time(conf):
             return
         if not should_push(conf, event, self.last_msg):
