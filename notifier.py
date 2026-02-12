@@ -6,6 +6,7 @@ import hashlib
 import urllib.request
 import urllib.parse
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict
 
@@ -15,12 +16,15 @@ PUSH_RETRY = 2
 class PushService:
     _max_workers = PUSH_MAX_WORKERS
     _executor: Optional[ThreadPoolExecutor] = None
-    _initialized = False
+    _executor_lock = threading.Lock()
+
     @classmethod
     def _ensure_executor(cls):
         if cls._executor is None:
-            cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
-            cls._initialized = True
+            with cls._executor_lock:
+                if cls._executor is None:
+                    cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
+                    logging.getLogger(__name__).info(f"ThreadPoolExecutor initialized with {cls._max_workers} workers")
     @staticmethod
     def get_fs_sign(secret: str, timestamp: str) -> str:
         string_to_sign = f"{timestamp}\n{secret}"
