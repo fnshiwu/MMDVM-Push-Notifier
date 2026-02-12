@@ -16,16 +16,17 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Any
 from parser import parse_line
 from filters import quiet_time, should_push
-from notify_fmt import format_message, format_boot_notice, format_temp_alert, format_test_push
+from notify_fmt import format_message, format_boot_notice, format_test_push
 from identity import Identity
 from hardware import Hardware
+from alerts import AlertManager
 from notifier import PushService
 from config import ConfigManager
 
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.3.0"
+VERSION = "v3.2.9"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -77,6 +78,7 @@ class MMDVMMonitor:
     def __init__(self):
         self.last_msg: Dict[str, Any] = {"call": "", "ts": 0}
         self.hw = Hardware()
+        self.alerts = AlertManager(self.hw)
         self.identity = Identity(LOCAL_ID_FILE)
         self.last_activity_ts: float = 0.0
 
@@ -99,7 +101,8 @@ class MMDVMMonitor:
             return "0"
 
     def check_temp_alert(self, conf: Dict):
-        res = self.hw.check_temp_alert(conf)
+        """Check and send temperature alert if needed | 检查并在需要时发送温度告警"""
+        res = self.alerts.check_temp_alert(conf)
         if res:
             title, body = res
             PushService.send(conf, title, body, is_voice=False)
