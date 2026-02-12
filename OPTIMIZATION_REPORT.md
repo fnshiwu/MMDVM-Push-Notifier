@@ -264,7 +264,10 @@ sudo python3 mmdvm_push.py --health
 
 ### 2. 观察运行状态
 ```bash
-# 查看日志
+# 查看日志（优先检查 /tmp，如果没有再看 /var/log/pi-star）
+tail -f /tmp/mmdvm_push.log
+
+# 或者
 tail -f /var/log/pi-star/mmdvm_push.log
 
 # 查看资源占用
