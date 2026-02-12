@@ -84,15 +84,24 @@ class ConfigManager:
         return conf
     @classmethod
     def get_config(cls, path: str = "/etc/mmdvm_push.json") -> Dict:
+        """Get configuration with thread-safe reload (HIGH #7 fix)"""
         now = time.time()
+
+        # Fast path: return cached config if still valid (no lock needed)
         if now - cls._last_check_time < cls._check_interval:
             return cls._config
+
+        # Slow path: acquire lock and check again
         with cls._lock:
+            # Re-check under lock to avoid redundant reads
             if now - cls._last_check_time < cls._check_interval:
                 return cls._config
+
             cls._last_check_time = now
+
             if not os.path.exists(path):
                 return cls._config
+
             try:
                 mtime = os.path.getmtime(path)
                 if mtime > cls._last_mtime:
@@ -100,8 +109,10 @@ class ConfigManager:
                         raw = json.load(f)
                     cls._config = cls._validate_config(raw)
                     cls._last_mtime = mtime
+                    logging.getLogger(__name__).info(f"Config reloaded from {path}")
             except json.JSONDecodeError as e:
                 logging.getLogger(__name__).error(f"Config JSON parse error: {e}")
             except OSError as e:
                 logging.getLogger(__name__).error(f"Config file read error: {e}")
+
             return cls._config

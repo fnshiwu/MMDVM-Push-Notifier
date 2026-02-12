@@ -12,7 +12,8 @@ import subprocess
 import atexit
 import logging
 import tempfile
-from datetime import datetime
+import socket
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from parser import parse_line
 from filters import quiet_time, should_push
@@ -113,50 +114,59 @@ class MMDVMMonitor:
             PushService.send(conf, title, body, is_voice=False)
 
     def get_latest_log(self) -> Optional[str]:
+        """Get latest log file (MEDIUM #8 fix: consistent UTC timezone)"""
         try:
-            # 优先尝试 UTC 时间（Pi-Star 默认使用 UTC 创建日志文件）
-            utc_date = datetime.utcnow().date()
-            utc_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{utc_date}.log")
+            # Pi-Star uses UTC for log files, so always use UTC
+            current_date = datetime.utcnow().date()
+            utc_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{current_date}.log")
             if os.path.exists(utc_log) and os.path.getsize(utc_log) > 0:
                 return utc_log
 
-            # Fallback 1: 尝试本地时间（兼容非标准配置）
-            local_date = datetime.now().date()
-            if local_date != utc_date:  # 避免重复检查
-                local_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{local_date}.log")
-                if os.path.exists(local_log) and os.path.getsize(local_log) > 0:
-                    return local_log
+            # Fallback: Check yesterday's log (for timezone edge cases)
+            yesterday = current_date - timedelta(days=1)
+            yesterday_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{yesterday}.log")
+            if os.path.exists(yesterday_log) and os.path.getsize(yesterday_log) > 0:
+                return yesterday_log
 
-            # Fallback 2: glob 查找最新文件（最后的保险）
+            # Final fallback: glob for most recent
             log_files = [
                 f for f in glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
                 if os.path.isfile(f) and os.path.getsize(f) > 0
             ]
             return max(log_files, key=os.path.getmtime) if log_files else None
-        except (OSError, ValueError):
+        except (OSError, ValueError) as e:
+            logger.error(f"Error finding log file: {e}")
             return None
 
     def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
-        """检查网络连通性"""
+        """检查网络连通性 (HIGH #4 fix: specific exception handling)"""
         logger.info("正在进入冷启动网络探测循环...")
 
         for i in range(max_attempts):
             try:
-                # 先快速检查 IP，避免不必要的网络请求
+                # 先快速检查 IP
                 ip_check = subprocess.getoutput("hostname -I").strip()
                 if not ip_check or ip_check.startswith("127."):
                     time.sleep(interval)
                     continue
 
-                # 只有 IP 正常才进行网络连通性测试
+                # 网络连通性测试
                 urllib.request.urlopen(
                     "http://www.apple.com/library/test/success.html",
                     timeout=3
                 )
                 logger.info(f"网络就绪 (尝试 {i+1})")
                 return True
-            except Exception:
-                pass
+            except (urllib.error.URLError, urllib.error.HTTPError, socket.timeout) as e:
+                # Expected network errors
+                logger.debug(f"Network check attempt {i+1} failed: {e}")
+            except subprocess.SubprocessError as e:
+                # hostname command failed
+                logger.warning(f"Failed to get IP address: {e}")
+            except Exception as e:
+                # Unexpected errors - log with full traceback
+                logger.error(f"Unexpected error in network check: {e}", exc_info=True)
+
             time.sleep(interval)
 
         logger.warning("网络探测超时")
@@ -205,9 +215,10 @@ class MMDVMMonitor:
                 time.sleep(5)
 
     def _tail_log(self, log_file: str):
-        """持续读取日志文件"""
+        """持续读取日志文件 (CRITICAL #3 & MEDIUM #9 fix)"""
         max_iterations = MAX_LOG_ITERATIONS
         iteration_count = 0
+        start_time = time.time()
 
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -216,8 +227,20 @@ class MMDVMMonitor:
 
                 while True:
                     iteration_count += 1
+
+                    # Reset counter every hour to prevent overflow on active logs
+                    if time.time() - start_time > 3600:
+                        iteration_count = 0
+                        start_time = time.time()
+                        logger.info(f"Iteration counter reset for active log: {log_file}")
+
                     if iteration_count > max_iterations:
                         logger.warning(f"达到最大迭代次数 {max_iterations}，重启日志监控")
+                        return
+
+                    # Check if file still exists and is readable
+                    if not os.path.exists(log_file):
+                        logger.warning(f"Log file deleted: {log_file}")
                         return
 
                     # 定期检查是否有新日志文件

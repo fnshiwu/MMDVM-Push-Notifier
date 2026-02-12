@@ -4,11 +4,24 @@ import logging
 from functools import lru_cache
 from threading import Semaphore
 from typing import Dict, Tuple
+from contextlib import contextmanager
 
 # Lock ordering: Always acquire _io_lock before any other locks
 # 锁顺序：始终在其他锁之前获取 _io_lock
 # This prevents deadlock when multiple modules interact
 _io_lock = Semaphore(4)
+_last_known_mtime = {}  # Track file mtimes for cache invalidation
+
+@contextmanager
+def _acquire_io_lock(timeout: float = 2.0):
+    """Context manager for IO lock acquisition | IO 锁获取的上下文管理器"""
+    acquired = _io_lock.acquire(timeout=timeout)
+    if not acquired:
+        raise TimeoutError("IO lock acquisition timeout")
+    try:
+        yield
+    finally:
+        _io_lock.release()
 
 # Geographic location mapping | 地理位置映射
 geo_map_cn = {
@@ -126,6 +139,17 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
         mtime = os.path.getmtime(id_file)
     except OSError:
         mtime = 0
+
+    # Clear cache if file was modified (HIGH #5 fix)
+    global _last_known_mtime
+    if id_file in _last_known_mtime and _last_known_mtime[id_file] != mtime:
+        old_size = _lookup_cached.cache_info().currsize
+        _lookup_cached.cache_clear()
+        logging.getLogger(__name__).info(
+            f"ID file modified, cleared {old_size} cache entries"
+        )
+    _last_known_mtime[id_file] = mtime
+
     return _lookup_cached(id_file, callsign, mtime)
 
 @lru_cache(maxsize=4096)
@@ -153,31 +177,36 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
             f"hit_rate={hit_rate:.1f}%, size={cache_info.currsize}/{cache_info.maxsize}"
         )
 
-    if not _io_lock.acquire(timeout=2):
-        logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")
-        return default_result
-
+    # Use context manager to ensure lock is always released (CRITICAL #1 fix)
     try:
-        file_size = os.path.getsize(id_file)
-        if file_size == 0:
-            _io_lock.release()
-            return default_result
-        with open(id_file, "rb") as f:
-            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+        with _acquire_io_lock(timeout=2.0):
+            file_size = os.path.getsize(id_file)
+            if file_size == 0:
+                return default_result
+
+            # Explicit file/mmap management to prevent FD leak (HIGH #6 fix)
+            f = None
+            mm = None
+            try:
+                f = open(id_file, "rb")
+                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+
                 query = f",{callsign},".encode("utf-8")
                 idx = mm.find(query)
                 if idx == -1:
-                    _io_lock.release()
                     return default_result
+
                 start = mm.rfind(b"\n", 0, idx) + 1
                 end = mm.find(b"\n", idx)
                 if end == -1:
                     end = len(mm)
                 line_bytes = mm[start:end]
+
                 try:
                     line = line_bytes.decode("utf-8")
                 except UnicodeDecodeError:
                     line = line_bytes.decode("gb18030", errors="replace")
+
                 parts = line.split(",")
                 first_name = parts[2].strip() if len(parts) > 2 else ""
                 last_name = parts[3].strip() if len(parts) > 3 else ""
@@ -187,15 +216,29 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 loc_en, loc_cn = resolve_loc(city, state, country)
                 full_name = f"{first_name} {last_name}".strip().upper()
                 name_part = f" ({full_name})" if full_name else ""
-                _io_lock.release()
                 return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
+
+            finally:
+                # Ensure resources are cleaned up even on exception
+                if mm is not None:
+                    try:
+                        mm.close()
+                    except Exception:
+                        pass
+                if f is not None:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+
+    except TimeoutError:
+        logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")
+        return default_result
     except (OSError, ValueError) as e:
         logging.getLogger(__name__).debug(f"Lookup error for {callsign}: {e}")
-        _io_lock.release()
         return default_result
     except Exception as e:
         logging.getLogger(__name__).error(f"Unexpected error in lookup for {callsign}: {e}")
-        _io_lock.release()
         return default_result
 
 class Identity:

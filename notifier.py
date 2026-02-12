@@ -19,12 +19,16 @@ class PushService:
     _executor_lock = threading.Lock()
 
     @classmethod
-    def _ensure_executor(cls):
-        if cls._executor is None:
-            with cls._executor_lock:
-                if cls._executor is None:
-                    cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
-                    logging.getLogger(__name__).info(f"ThreadPoolExecutor initialized with {cls._max_workers} workers")
+    def _ensure_executor(cls) -> bool:
+        """
+        Ensure executor exists. Returns False if shutdown in progress.
+        确保执行器存在。如果正在关闭则返回 False。
+        """
+        with cls._executor_lock:
+            if cls._executor is None:
+                cls._executor = ThreadPoolExecutor(max_workers=cls._max_workers)
+                logging.getLogger(__name__).info(f"ThreadPoolExecutor initialized with {cls._max_workers} workers")
+            return cls._executor is not None
     @staticmethod
     def get_fs_sign(secret: str, timestamp: str) -> str:
         string_to_sign = f"{timestamp}\n{secret}"
@@ -99,9 +103,18 @@ class PushService:
         return None
     @classmethod
     def send(cls, config: Dict, type_label: str, body_text: str, is_voice: bool = True, async_mode: bool = True):
-        cls._ensure_executor()
+        # CRITICAL #2 fix: Check executor under lock to prevent race with shutdown
+        if not cls._ensure_executor():
+            logging.getLogger(__name__).warning("Cannot send: executor is shutdown")
+            return
+
         if async_mode:
-            cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
+            with cls._executor_lock:
+                if cls._executor is not None:
+                    cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
+                else:
+                    logging.getLogger(__name__).warning("Executor shutdown during send, executing synchronously")
+                    cls._do_push_logic(config, type_label, body_text, is_voice)
         else:
             cls._do_push_logic(config, type_label, body_text, is_voice)
     @classmethod

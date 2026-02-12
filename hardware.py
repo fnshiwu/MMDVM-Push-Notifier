@@ -23,11 +23,24 @@ class Hardware:
         self._cpu_prev_idle = None
         self._last_cpu_read = 0.0  # CPU 缓存时间戳
         self._cached_cpu = "0"     # CPU 缓存值
+        self._cache_start_time = time.time()  # MEDIUM #12 fix: track cache age
+
+    def _reset_cpu_cache_if_needed(self):
+        """Reset CPU cache after 24 hours to prevent overflow (MEDIUM #12 fix)"""
+        if time.time() - self._cache_start_time > 86400:
+            self._cpu_prev_total = None
+            self._cpu_prev_idle = None
+            self._last_cpu_read = 0.0
+            self._cache_start_time = time.time()
+            logging.getLogger(__name__).info("CPU cache reset after 24 hours")
     def _cpu_percent_top(self) -> str:
         """
         Get system CPU usage using top command
         使用 top 命令获取系统 CPU 占用率
         """
+        # Reset cache if needed (MEDIUM #12 fix)
+        self._reset_cpu_cache_if_needed()
+
         # 如果距离上次读取不到3秒，直接返回缓存值
         import time as _time
         now = _time.time()
@@ -280,7 +293,7 @@ class Hardware:
 
     def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
         """
-        Get current system temperature
+        Get current system temperature (MEDIUM #10 fix: distinguish error types)
         获取当前系统温度
 
         Args:
@@ -288,6 +301,9 @@ class Hardware:
 
         Returns:
             Tuple of (formatted_string, raw_value)
+            - ("N/A", -1.0) if sensor not available
+            - ("ERROR", -2.0) if sensor read error
+            - (formatted, value) if successful
         """
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
@@ -296,11 +312,17 @@ class Hardware:
             # Validate temperature is within reasonable bounds
             if temp_c < TEMP_MIN_CELSIUS or temp_c > TEMP_MAX_CELSIUS:
                 logging.getLogger(__name__).warning(f"Temperature out of range: {temp_c}°C")
-                return "N/A", 0.0
+                return "ERROR", -2.0
 
             unit = str(conf.get("temp_unit", "C")).upper()
             val = (temp_c * 9/5) + 32 if unit == "F" else temp_c
             return f"{val:.1f}°{unit}", val
-        except (FileNotFoundError, ValueError, OSError):
-            return "N/A", 0.0
+
+        except FileNotFoundError:
+            # Sensor not available (expected on some systems)
+            return "N/A", -1.0
+        except (ValueError, OSError) as e:
+            # Sensor read error (unexpected)
+            logging.getLogger(__name__).error(f"Temperature sensor error: {e}")
+            return "ERROR", -2.0
 
