@@ -25,7 +25,7 @@ from config import ConfigManager
 # =========================
 # Global Constants
 # =========================
-VERSION = "v3.2.9"
+VERSION = "v3.3.0"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -68,14 +68,7 @@ def setup_logging():
     if APP_LOG_DIR != "/var/log/pi-star/":
         logger.warning(f"No write permission for /var/log/pi-star/. Falling back to {APP_LOG_DIR}")
 
-class HamInfoManager:
-    def __init__(self, id_file: str):
-        self.identity = Identity(id_file)
-    def get_info(self, callsign: str) -> Dict[str, str]:
-        return self.identity.get_info(callsign)
-
 atexit.register(PushService.shutdown)
-
 
 # =========================
 # Monitor Logic
@@ -84,27 +77,14 @@ class MMDVMMonitor:
     def __init__(self):
         self.last_msg: Dict[str, Any] = {"call": "", "ts": 0}
         self.hw = Hardware()
-        self.ham_manager = HamInfoManager(LOCAL_ID_FILE)
+        self.identity = Identity(LOCAL_ID_FILE)
         self.last_activity_ts: float = 0.0
-        
+
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
-        ip, cpu, mem = self.get_sys_info()
-        temp_str, _ = self.get_current_temp(conf)
+        ip, cpu, mem = self.hw.get_sys_info()
+        temp_str, _ = self.hw.get_current_temp(conf)
         title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
         PushService.send(conf, title, body, is_voice=False, async_mode=False)
-        
-
-    def _cpu_percent_proc(self) -> str:
-        return self.hw._cpu_percent_top()
-
-    def _cpu_percent_top(self) -> str:
-        return self.hw._cpu_percent_top()
-
-    def _cpu_percent_process(self, interval: float = 1.0) -> str:
-        return self.hw._cpu_percent_process(interval=interval)
-
-    def _cpu_percent_process_top(self) -> str:
-        return self.hw._cpu_percent_process_top()
 
     def _proc_mem_rss_kb(self) -> str:
         try:
@@ -117,15 +97,6 @@ class MMDVMMonitor:
             return "0"
         except Exception:
             return "0"
-
-    def _mem_percent_proc(self) -> str:
-        return self.hw._mem_percent_proc()
-
-    def get_sys_info(self) -> Tuple[str, str, str]:
-        return self.hw.get_sys_info()
-
-    def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
-        return self.hw.get_current_temp(conf)
 
     def check_temp_alert(self, conf: Dict):
         res = self.hw.check_temp_alert(conf)
@@ -243,8 +214,8 @@ class MMDVMMonitor:
             return
         curr_ts = time.time()
         self.last_msg.update({"call": event['call'], "ts": curr_ts})
-        info = self.ham_manager.get_info(event['call'])
-        temp_str, _ = self.get_current_temp(conf)
+        info = self.identity.get_info(event['call'])
+        temp_str, _ = self.hw.get_current_temp(conf)
         type_label, body = format_message(conf, event, temp_str, info)
         self.last_activity_ts = time.time()
         PushService.send(conf, type_label, body, is_voice=event['is_voice'])
@@ -258,16 +229,16 @@ if __name__ == "__main__":
         setup_logging()
         monitor = MMDVMMonitor()
         conf = ConfigManager.get_config()
-        ip, cpu, mem = monitor.get_sys_info()
-        temp_str, _ = monitor.get_current_temp(conf)
+        ip, cpu, mem = monitor.hw.get_sys_info()
+        temp_str, _ = monitor.hw.get_current_temp(conf)
         title, test_body = format_test_push(conf, VERSION, ip, temp_str, cpu, mem)
         PushService.send(conf, title, test_body, is_voice=False, async_mode=False)
         print("Success")
     elif len(sys.argv) > 1 and sys.argv[1] == "--health":
         conf = ConfigManager.get_config()
         mon = MMDVMMonitor()
-        ip, cpu_sys, mem_sys = mon.get_sys_info()
-        cpu_proc = mon._cpu_percent_process_top()
+        ip, cpu_sys, mem_sys = mon.hw.get_sys_info()
+        cpu_proc = mon.hw._cpu_percent_process_top()
         rss_kb = mon._proc_mem_rss_kb()
         status = {
             "version": VERSION,
