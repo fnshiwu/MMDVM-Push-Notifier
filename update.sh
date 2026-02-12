@@ -23,7 +23,7 @@ sudo git fetch --all
 sudo git reset --hard origin/main
 
 # Core files integrity check | 核心文件完整性检查
-REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py identity.py hardware.py notifier.py config.py mmdvm_push.service"
+REQ_FILES="mmdvm_push.py push_admin.php parser.py filters.py notify_fmt.py identity.py hardware.py notifier.py config.py alerts.py mmdvm_push.service"
 MISSING=""
 for f in $REQ_FILES; do
     [ -f "$f" ] || MISSING="$MISSING $f"
