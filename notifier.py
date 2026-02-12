@@ -119,8 +119,14 @@ class PushService:
             cls._do_push_logic(config, type_label, body_text, is_voice)
     @classmethod
     def shutdown(cls):
+        # HIGH #9 fix: Release lock before shutdown(wait=True) to prevent deadlock
+        executor_to_shutdown = None
         with cls._executor_lock:
             if cls._executor is not None:
-                cls._executor.shutdown(wait=True)
+                executor_to_shutdown = cls._executor
                 cls._executor = None
-                logging.getLogger(__name__).info("ThreadPoolExecutor shutdown complete")
+
+        # Shutdown outside lock to prevent deadlock if workers need the lock
+        if executor_to_shutdown is not None:
+            executor_to_shutdown.shutdown(wait=True)
+            logging.getLogger(__name__).info("ThreadPoolExecutor shutdown complete")

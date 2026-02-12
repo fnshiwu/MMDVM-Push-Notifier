@@ -168,17 +168,24 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
     """
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
 
-    # Log cache statistics periodically
+    # LOW #15 fix: Log cache statistics less frequently (every 5000 instead of 1000)
     cache_info = _lookup_cached.cache_info()
-    if cache_info.hits + cache_info.misses > 0 and (cache_info.hits + cache_info.misses) % 1000 == 0:
-        hit_rate = cache_info.hits / (cache_info.hits + cache_info.misses) * 100
+    total_ops = cache_info.hits + cache_info.misses
+    if total_ops > 0 and total_ops % 5000 == 0:
+        hit_rate = cache_info.hits / total_ops * 100
         logging.getLogger(__name__).info(
             f"Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, "
             f"hit_rate={hit_rate:.1f}%, size={cache_info.currsize}/{cache_info.maxsize}"
         )
+        # MEDIUM #6 fix: Warn if cache is near capacity
+        if cache_info.currsize >= cache_info.maxsize * 0.9:
+            logging.getLogger(__name__).warning(
+                f"Cache near capacity: {cache_info.currsize}/{cache_info.maxsize} entries"
+            )
 
     # Use context manager to ensure lock is always released (CRITICAL #1 fix)
     try:
+        # MEDIUM #13 fix: Use timeout on lock acquisition to prevent indefinite blocking
         with _acquire_io_lock(timeout=2.0):
             file_size = os.path.getsize(id_file)
             if file_size == 0:
@@ -204,7 +211,12 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
 
                 try:
                     line = line_bytes.decode("utf-8")
-                except UnicodeDecodeError:
+                except UnicodeDecodeError as e:
+                    # LOW #18 fix: Log decode error with details
+                    logging.getLogger(__name__).debug(
+                        f"UTF-8 decode failed at position {e.start}-{e.end}, "
+                        f"falling back to gb18030: {e.reason}"
+                    )
                     line = line_bytes.decode("gb18030", errors="replace")
 
                 parts = line.split(",")
@@ -219,17 +231,17 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
 
             finally:
-                # Ensure resources are cleaned up even on exception
+                # Ensure resources are cleaned up even on exception (HIGH #7 fix)
                 if mm is not None:
                     try:
                         mm.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Failed to close mmap: {e}")
                 if f is not None:
                     try:
                         f.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.getLogger(__name__).warning(f"Failed to close file: {e}")
 
     except TimeoutError:
         logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")

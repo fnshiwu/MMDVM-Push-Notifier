@@ -34,7 +34,6 @@ LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 LOG_POLL_INTERVAL = 0.2
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
-TEMP_CHECK_INTERVAL = 30  # 温度检查间隔（秒）
 MEMORY_CHECK_INTERVAL = 3600  # 内存检查间隔（秒）
 MEMORY_THRESHOLD_KB = 100000  # 内存阈值（KB）
 MAX_LOG_ITERATIONS = 100000  # 日志循环最大迭代次数
@@ -139,13 +138,20 @@ class MMDVMMonitor:
             return None
 
     def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
-        """检查网络连通性 (HIGH #4 fix: specific exception handling)"""
+        """检查网络连通性 (HIGH #4 & MEDIUM #11 fix)"""
         logger.info("正在进入冷启动网络探测循环...")
 
         for i in range(max_attempts):
             try:
-                # 先快速检查 IP
-                ip_check = subprocess.getoutput("hostname -I").strip()
+                # MEDIUM #11 fix: Validate subprocess output before using
+                result = subprocess.run(
+                    ["hostname", "-I"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False
+                )
+                ip_check = result.stdout.strip() if result.returncode == 0 else ""
                 if not ip_check or ip_check.startswith("127."):
                     time.sleep(interval)
                     continue
@@ -215,7 +221,7 @@ class MMDVMMonitor:
                 time.sleep(5)
 
     def _tail_log(self, log_file: str):
-        """持续读取日志文件 (CRITICAL #3 & MEDIUM #9 fix)"""
+        """持续读取日志文件 (CRITICAL #3 & MEDIUM #8 & #9 fix)"""
         max_iterations = MAX_LOG_ITERATIONS
         iteration_count = 0
         start_time = time.time()
@@ -226,13 +232,13 @@ class MMDVMMonitor:
                 last_check = time.time()
 
                 while True:
-                    iteration_count += 1
-
-                    # Reset counter every hour to prevent overflow on active logs
-                    if time.time() - start_time > 3600:
+                    # MEDIUM #8 fix: Reset counter every hour BEFORE incrementing
+                    if time.time() - start_time >= 3600:
                         iteration_count = 0
                         start_time = time.time()
                         logger.info(f"Iteration counter reset for active log: {log_file}")
+
+                    iteration_count += 1
 
                     if iteration_count > max_iterations:
                         logger.warning(f"达到最大迭代次数 {max_iterations}，重启日志监控")
@@ -246,13 +252,19 @@ class MMDVMMonitor:
                     # 定期检查是否有新日志文件
                     if time.time() - last_check > 5:
                         new_log = self.get_latest_log()
+                        # MEDIUM #20 fix: Only switch if new log is different AND newer
                         if new_log and new_log != log_file:
-                            rest = f.read()
-                            if rest:
-                                for line in rest.splitlines():
-                                    self.process_line(line)
-                            logger.info(f"切换到新日志: {new_log}")
-                            return  # 退出当前循环，让外层重新打开新文件
+                            try:
+                                # Verify new log is actually newer before switching
+                                if os.path.getmtime(new_log) > os.path.getmtime(log_file):
+                                    rest = f.read()
+                                    if rest:
+                                        for line in rest.splitlines():
+                                            self.process_line(line)
+                                    logger.info(f"切换到新日志: {new_log}")
+                                    return  # 退出当前循环，让外层重新打开新文件
+                            except OSError as e:
+                                logger.warning(f"Failed to compare log file times: {e}")
                         last_check = time.time()
 
                     line = f.readline()
@@ -281,9 +293,10 @@ class MMDVMMonitor:
             return
         conf = ConfigManager.get_config()
 
-        # 只在有活动时每30秒检查一次温度，而不是每行都检查
+        # MEDIUM #19 fix: Use configurable temp_interval instead of hardcoded constant
         now = time.time()
-        if now - self._last_temp_check > TEMP_CHECK_INTERVAL:
+        temp_interval = conf.get('temp_interval', 30)
+        if now - self._last_temp_check > temp_interval:
             self.check_temp_alert(conf)
             self._last_temp_check = now
 

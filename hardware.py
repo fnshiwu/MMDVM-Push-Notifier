@@ -4,8 +4,10 @@
 # 读取系统指标：CPU、内存、温度
 
 import os
+import time
 import subprocess
 import logging
+import re
 from typing import Tuple, Dict
 
 # Constants for performance tuning | 性能调优常量
@@ -42,8 +44,7 @@ class Hardware:
         self._reset_cpu_cache_if_needed()
 
         # 如果距离上次读取不到3秒，直接返回缓存值
-        import time as _time
-        now = _time.time()
+        now = time.time()
         if now - self._last_cpu_read < CPU_CACHE_TIMEOUT:
             return self._cached_cpu
 
@@ -84,7 +85,7 @@ class Hardware:
                     return result_str
         except Exception as e:
             logging.getLogger(__name__).debug(f"top command failed: {e}")
-            pass
+            # Fallthrough to /proc/stat fallback
 
         # Fallback to /proc/stat
         try:
@@ -128,8 +129,7 @@ class Hardware:
         Returns:
             CPU usage percentage as string (e.g., "45.2")
         """
-        import time as _time
-        now = _time.time()
+        now = time.time()
 
         with open("/proc/stat", "r") as f:
             parts = f.readline().split()
@@ -142,7 +142,7 @@ class Hardware:
 
         if prev_total is None or prev_idle is None:
             # First call: sleep and measure again
-            _time.sleep(1.0)
+            time.sleep(1.0)
             with open("/proc/stat", "r") as f2:
                 parts2 = f2.readline().split()
             total2, idleall2 = self._parse_proc_stat_line(parts2)
@@ -189,7 +189,7 @@ class Hardware:
                     ma = float(line.split()[1])
                 if mt is not None and ma is not None:
                     break
-        if mt and ma:
+        if mt and ma and mt > 0:  # ISSUE #4 fix: check mt > 0
             used = (mt - ma) / mt * 100.0
             return f"{used:.1f}%"
         return "0%"
@@ -276,7 +276,9 @@ class Hardware:
                 timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
-            ip = result.stdout.split()[0]
+            # ISSUE #17 fix: check array before accessing
+            ip_parts = result.stdout.split()
+            ip = ip_parts[0] if ip_parts else "Unknown"
         except (IndexError, Exception):
             ip = "Unknown"
         cpu = self._cpu_percent_top()
