@@ -5,7 +5,14 @@
 
 import os
 import subprocess
+import logging
 from typing import Tuple, Dict
+
+# Constants for performance tuning | 性能调优常量
+CPU_CACHE_TIMEOUT = 3.0  # CPU 缓存超时（秒）
+TEMP_MIN_CELSIUS = -50.0  # 最低温度（摄氏度）
+TEMP_MAX_CELSIUS = 150.0  # 最高温度（摄氏度）
+SUBPROCESS_TIMEOUT = 5  # 子进程超时（秒）
 
 
 class Hardware:
@@ -24,7 +31,7 @@ class Hardware:
         # 如果距离上次读取不到3秒，直接返回缓存值
         import time as _time
         now = _time.time()
-        if now - self._last_cpu_read < 3.0:
+        if now - self._last_cpu_read < CPU_CACHE_TIMEOUT:
             return self._cached_cpu
 
         try:
@@ -32,7 +39,7 @@ class Hardware:
                 ["top", "-bn1"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
             out = result.stdout
@@ -62,79 +69,103 @@ class Hardware:
                     self._last_cpu_read = now
                     self._cached_cpu = result_str
                     return result_str
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"top command failed: {e}")
             pass
+
+        # Fallback to /proc/stat
         try:
-            with open("/proc/stat", "r") as f:
-                parts = f.readline().split()
-            if not parts or parts[0] != "cpu":
+            return self._cpu_from_proc_stat()
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"/proc/stat read failed: {e}")
+            return self._cached_cpu if self._cached_cpu else "0"
+
+    def _parse_proc_stat_line(self, parts: list) -> Tuple[int, int]:
+        """
+        Parse /proc/stat line and return (total, idle)
+        解析 /proc/stat 行返回 (总计, 空闲)
+
+        Args:
+            parts: Split line from /proc/stat
+
+        Returns:
+            Tuple of (total_cpu_time, idle_cpu_time)
+        """
+        if not parts or parts[0] != "cpu":
+            return 0, 0
+        nums = [int(x) for x in parts[1:]]
+        user = nums[0] if len(nums) > 0 else 0
+        nice = nums[1] if len(nums) > 1 else 0
+        system = nums[2] if len(nums) > 2 else 0
+        idle = nums[3] if len(nums) > 3 else 0
+        iowait = nums[4] if len(nums) > 4 else 0
+        irq = nums[5] if len(nums) > 5 else 0
+        softirq = nums[6] if len(nums) > 6 else 0
+        steal = nums[7] if len(nums) > 7 else 0
+        idleall = idle
+        nonidle = user + nice + system + irq + softirq + steal + iowait
+        total = idleall + nonidle
+        return total, idleall
+
+    def _cpu_from_proc_stat(self) -> str:
+        """
+        Get CPU from /proc/stat with caching
+        从 /proc/stat 获取 CPU（带缓存）
+
+        Returns:
+            CPU usage percentage as string (e.g., "45.2")
+        """
+        import time as _time
+        now = _time.time()
+
+        with open("/proc/stat", "r") as f:
+            parts = f.readline().split()
+        total, idleall = self._parse_proc_stat_line(parts)
+        if total == 0:
+            return "0"
+
+        prev_total = self._cpu_prev_total
+        prev_idle = self._cpu_prev_idle
+
+        if prev_total is None or prev_idle is None:
+            # First call: sleep and measure again
+            _time.sleep(1.0)
+            with open("/proc/stat", "r") as f2:
+                parts2 = f2.readline().split()
+            total2, idleall2 = self._parse_proc_stat_line(parts2)
+            if total2 == 0:
                 return "0"
-            nums = [int(x) for x in parts[1:]]
-            user = nums[0] if len(nums) > 0 else 0
-            nice = nums[1] if len(nums) > 1 else 0
-            system = nums[2] if len(nums) > 2 else 0
-            idle = nums[3] if len(nums) > 3 else 0
-            iowait = nums[4] if len(nums) > 4 else 0
-            irq = nums[5] if len(nums) > 5 else 0
-            softirq = nums[6] if len(nums) > 6 else 0
-            steal = nums[7] if len(nums) > 7 else 0
-            idleall = idle
-            nonidle = user + nice + system + irq + softirq + steal + iowait
-            total = idleall + nonidle
-            prev_total = self._cpu_prev_total
-            prev_idle = self._cpu_prev_idle
-            if prev_total is None or prev_idle is None:
-                import time as _t
-                _t.sleep(1.0)
-                with open("/proc/stat", "r") as f2:
-                    parts2 = f2.readline().split()
-                if not parts2 or parts2[0] != "cpu":
-                    return "0"
-                nums2 = [int(x) for x in parts2[1:]]
-                user2 = nums2[0] if len(nums2) > 0 else 0
-                nice2 = nums2[1] if len(nums2) > 1 else 0
-                system2 = nums2[2] if len(nums2) > 2 else 0
-                idle2 = nums2[3] if len(nums2) > 3 else 0
-                iowait2 = nums2[4] if len(nums2) > 4 else 0
-                irq2 = nums2[5] if len(nums2) > 5 else 0
-                softirq2 = nums2[6] if len(nums2) > 6 else 0
-                steal2 = nums2[7] if len(nums2) > 7 else 0
-                idleall2 = idle2
-                nonidle2 = user2 + nice2 + system2 + irq2 + softirq2 + steal2 + iowait2
-                total2 = idleall2 + nonidle2
-                totald_i = total2 - total
-                idled_i = idleall2 - idleall
-                self._cpu_prev_total = total2
-                self._cpu_prev_idle = idleall2
-                pct_i = 0.0 if totald_i <= 0 else (totald_i - idled_i) * 100.0 / totald_i
-                if pct_i < 0.0:
-                    pct_i = 0.0
-                if pct_i > 100.0:
-                    pct_i = 100.0
-                result = f"{pct_i:.1f}"
-                self._last_cpu_read = now
-                self._cached_cpu = result
-                return result
-            self._cpu_prev_total = total
-            self._cpu_prev_idle = idleall
-            totald = total - prev_total
-            idled = idleall - prev_idle
-            pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
-            if pct < 0.0:
-                pct = 0.0
-            if pct > 100.0:
-                pct = 100.0
-            result = f"{pct:.1f}"
+
+            totald_i = total2 - total
+            idled_i = idleall2 - idleall
+            self._cpu_prev_total = total2
+            self._cpu_prev_idle = idleall2
+            pct_i = 0.0 if totald_i <= 0 else (totald_i - idled_i) * 100.0 / totald_i
+            pct_i = max(0.0, min(100.0, pct_i))
+            result = f"{pct_i:.1f}"
             self._last_cpu_read = now
             self._cached_cpu = result
             return result
-        except Exception:
-            return self._cached_cpu if self._cached_cpu != "0" else "0"
+
+        # Use cached previous values
+        self._cpu_prev_total = total
+        self._cpu_prev_idle = idleall
+        totald = total - prev_total
+        idled = idleall - prev_idle
+        pct = 0.0 if totald <= 0 else (totald - idled) * 100.0 / totald
+        pct = max(0.0, min(100.0, pct))
+        result = f"{pct:.1f}"
+        self._last_cpu_read = now
+        self._cached_cpu = result
+        return result
 
     def _mem_percent_proc(self) -> str:
         """
         Get memory usage from /proc/meminfo
         从 /proc/meminfo 获取内存占用率
+
+        Returns:
+            Memory usage percentage as string (e.g., "65.3%")
         """
         mt = ma = None
         with open("/proc/meminfo", "r") as f:
@@ -189,7 +220,8 @@ class Hardware:
             if pct > max_pct:
                 pct = max_pct
             return f"{pct:.1f}"
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Process CPU read failed: {e}")
             return "0"
 
     def _cpu_percent_process_top(self) -> str:
@@ -203,7 +235,7 @@ class Hardware:
                 ["ps", "-p", str(pid), "-o", "%cpu", "--no-headers"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
             val = result.stdout.strip()
@@ -211,7 +243,8 @@ class Hardware:
                 return self._cpu_percent_process(interval=1.0)
             f = float(val)
             return f"{f:.1f}"
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"ps command failed: {e}")
             return self._cpu_percent_process(interval=1.0)
 
     def get_sys_info(self) -> Tuple[str, str, str]:
@@ -227,7 +260,7 @@ class Hardware:
                 ["hostname", "-I"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
             ip = result.stdout.split()[0]
@@ -236,10 +269,12 @@ class Hardware:
         cpu = self._cpu_percent_top()
         try:
             mem = self._mem_percent_proc()
-        except Exception:
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"Memory read from /proc failed: {e}")
             try:
                 mem = subprocess.getoutput("free -m | awk 'NR==2{printf \"%.1f%%\", $3*100/$2 }'").strip()
-            except Exception:
+            except Exception as e2:
+                logging.getLogger(__name__).debug(f"Memory read from free failed: {e2}")
                 mem = "0%"
         return ip, cpu, mem
 
@@ -259,7 +294,7 @@ class Hardware:
                 temp_c = float(f.read().strip()) / 1000.0
 
             # Validate temperature is within reasonable bounds
-            if temp_c < -50 or temp_c > 150:
+            if temp_c < TEMP_MIN_CELSIUS or temp_c > TEMP_MAX_CELSIUS:
                 logging.getLogger(__name__).warning(f"Temperature out of range: {temp_c}°C")
                 return "N/A", 0.0
 

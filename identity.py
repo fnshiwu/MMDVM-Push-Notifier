@@ -111,7 +111,17 @@ def resolve_loc(city: str, state: str, country: str) -> Tuple[str, str]:
     return loc_en, loc_cn
 
 def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
-    """Lookup callsign info with file mtime for cache invalidation"""
+    """
+    Lookup callsign info with file mtime for cache invalidation
+    查找呼号信息（带文件修改时间缓存失效）
+
+    Args:
+        id_file: Path to ID file
+        callsign: Callsign to lookup
+
+    Returns:
+        Dict with name, loc_en, loc_cn
+    """
     try:
         mtime = os.path.getmtime(id_file)
     except OSError:
@@ -120,7 +130,28 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
 
 @lru_cache(maxsize=4096)
 def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
+    """
+    Cached lookup with mtime-based invalidation
+    带 mtime 失效的缓存查找
+
+    Args:
+        id_file: Path to ID file
+        callsign: Callsign to lookup
+        mtime: File modification time for cache key
+
+    Returns:
+        Dict with name, loc_en, loc_cn
+    """
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
+
+    # Log cache statistics periodically
+    cache_info = _lookup_cached.cache_info()
+    if cache_info.hits + cache_info.misses > 0 and (cache_info.hits + cache_info.misses) % 1000 == 0:
+        hit_rate = cache_info.hits / (cache_info.hits + cache_info.misses) * 100
+        logging.getLogger(__name__).info(
+            f"Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, "
+            f"hit_rate={hit_rate:.1f}%, size={cache_info.currsize}/{cache_info.maxsize}"
+        )
 
     if not _io_lock.acquire(timeout=2):
         logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")

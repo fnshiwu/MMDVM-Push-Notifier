@@ -33,6 +33,10 @@ LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 LOG_POLL_INTERVAL = 0.2
 PUSH_MAX_WORKERS = 3
 PUSH_RETRY = 2
+TEMP_CHECK_INTERVAL = 30  # 温度检查间隔（秒）
+MEMORY_CHECK_INTERVAL = 3600  # 内存检查间隔（秒）
+MEMORY_THRESHOLD_KB = 100000  # 内存阈值（KB）
+MAX_LOG_ITERATIONS = 100000  # 日志循环最大迭代次数
 
 # 版本查询快速返回，避免初始化日志等产生额外输出
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
@@ -178,9 +182,9 @@ class MMDVMMonitor:
         while True:
             try:
                 # 每小时检查一次内存
-                if time.time() - last_mem_check > 3600:
+                if time.time() - last_mem_check > MEMORY_CHECK_INTERVAL:
                     rss_kb = int(self._proc_mem_rss_kb())
-                    if rss_kb > 100000:  # 超过100MB
+                    if rss_kb > MEMORY_THRESHOLD_KB:
                         logger.warning(f"内存占用过高: {rss_kb}KB，建议重启服务")
                     else:
                         logger.info(f"内存占用正常: {rss_kb}KB")
@@ -202,7 +206,7 @@ class MMDVMMonitor:
 
     def _tail_log(self, log_file: str):
         """持续读取日志文件"""
-        max_iterations = 100000  # 防止无限循环
+        max_iterations = MAX_LOG_ITERATIONS
         iteration_count = 0
 
         try:
@@ -256,7 +260,7 @@ class MMDVMMonitor:
 
         # 只在有活动时每30秒检查一次温度，而不是每行都检查
         now = time.time()
-        if now - self._last_temp_check > 30:
+        if now - self._last_temp_check > TEMP_CHECK_INTERVAL:
             self.check_temp_alert(conf)
             self._last_temp_check = now
 

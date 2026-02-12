@@ -27,7 +27,16 @@ def _parse_list(data):
     return set(_parse_list_cached(s))
 
 def _validate_time(time_str: str) -> bool:
-    """Validate time format HH:MM | 验证时间格式"""
+    """
+    Validate time format HH:MM
+    验证时间格式
+
+    Args:
+        time_str: Time string in HH:MM format
+
+    Returns:
+        True if valid, False otherwise
+    """
     try:
         parts = time_str.split(':')
         if len(parts) != 2:
