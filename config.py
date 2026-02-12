@@ -2,6 +2,7 @@ import os
 import time
 import json
 import logging
+import urllib.parse
 from threading import Lock
 from typing import Dict
 
@@ -11,6 +12,36 @@ class ConfigManager:
     _check_interval: int = 30  # 从5秒优化为30秒
     _last_check_time: float = 0.0
     _lock = Lock()
+
+    @staticmethod
+    def _validate_url(url: str) -> str:
+        """Validate URL format | 验证 URL 格式"""
+        if not url:
+            return ""
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme not in ('http', 'https'):
+                logging.getLogger(__name__).warning(f"Invalid URL scheme: {parsed.scheme}, URL: {url}")
+                return ""
+            if not parsed.netloc:
+                logging.getLogger(__name__).warning(f"Invalid URL (no host): {url}")
+                return ""
+            return url
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"URL validation failed: {e}")
+            return ""
+
+    @staticmethod
+    def _validate_token(token: str, min_length: int = 10) -> str:
+        """Validate token format | 验证 token 格式"""
+        if not token:
+            return ""
+        token = str(token).strip()
+        if len(token) < min_length:
+            logging.getLogger(__name__).warning(f"Token too short (< {min_length} chars)")
+            return ""
+        return token
+
     @classmethod
     def _validate_config(cls, raw: Dict) -> Dict:
         defaults = {
@@ -32,10 +63,16 @@ class ConfigManager:
             conf.update(raw)
         try:
             conf["min_duration"] = max(0.1, float(conf.get("min_duration", defaults["min_duration"])))
-            conf["temp_threshold"] = float(conf.get("temp_threshold", defaults["temp_threshold"]))
-            conf["temp_interval"] = int(conf.get("temp_interval", defaults["temp_interval"]))
+            conf["temp_threshold"] = max(0.0, min(150.0, float(conf.get("temp_threshold", defaults["temp_threshold"]))))
+            conf["temp_interval"] = max(10, int(conf.get("temp_interval", defaults["temp_interval"])))
             unit = str(conf.get("temp_unit", "C")).upper()
             conf["temp_unit"] = "F" if unit == "F" else "C"
+
+            # Validate URLs and tokens
+            conf["fs_webhook"] = cls._validate_url(conf.get("fs_webhook", ""))
+            conf["wx_token"] = cls._validate_token(conf.get("wx_token", ""), min_length=10)
+            conf["tg_token"] = cls._validate_token(conf.get("tg_token", ""), min_length=20)
+
             qm = conf.get("quiet_mode", defaults["quiet_mode"])
             conf["quiet_mode"] = {
                 "enabled": bool(qm.get("enabled", False)),

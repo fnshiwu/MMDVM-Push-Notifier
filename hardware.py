@@ -257,6 +257,12 @@ class Hardware:
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read().strip()) / 1000.0
+
+            # Validate temperature is within reasonable bounds
+            if temp_c < -50 or temp_c > 150:
+                logging.getLogger(__name__).warning(f"Temperature out of range: {temp_c}°C")
+                return "N/A", 0.0
+
             unit = str(conf.get("temp_unit", "C")).upper()
             val = (temp_c * 9/5) + 32 if unit == "F" else temp_c
             return f"{val:.1f}°{unit}", val

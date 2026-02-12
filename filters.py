@@ -26,6 +26,17 @@ def _parse_list(data):
         return set()
     return set(_parse_list_cached(s))
 
+def _validate_time(time_str: str) -> bool:
+    """Validate time format HH:MM | 验证时间格式"""
+    try:
+        parts = time_str.split(':')
+        if len(parts) != 2:
+            return False
+        h, m = int(parts[0]), int(parts[1])
+        return 0 <= h < 24 and 0 <= m < 60
+    except (ValueError, AttributeError):
+        return False
+
 def quiet_time(conf: dict) -> bool:
     # Check quiet time window; supports cross-day ranges
     # 检查静音时段窗口；支持跨天时间范围
@@ -35,6 +46,13 @@ def quiet_time(conf: dict) -> bool:
     now = datetime.now().strftime("%H:%M")
     start = qc.get('start', '23:00')
     end = qc.get('end', '07:00')
+
+    # Validate time formats
+    if not _validate_time(start) or not _validate_time(end):
+        import logging
+        logging.getLogger(__name__).warning(f"Invalid quiet time format: start={start}, end={end}")
+        return False
+
     if start <= end:
         return start <= now <= end
     return now >= start or now <= end

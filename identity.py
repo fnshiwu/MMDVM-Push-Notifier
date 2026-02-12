@@ -5,6 +5,9 @@ from functools import lru_cache
 from threading import Semaphore
 from typing import Dict, Tuple
 
+# Lock ordering: Always acquire _io_lock before any other locks
+# 锁顺序：始终在其他锁之前获取 _io_lock
+# This prevents deadlock when multiple modules interact
 _io_lock = Semaphore(4)
 
 # Geographic location mapping | 地理位置映射
