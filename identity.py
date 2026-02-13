@@ -6,11 +6,10 @@ from threading import Semaphore
 from typing import Dict, Tuple
 from contextlib import contextmanager
 
-# Lock ordering: Always acquire _io_lock before any other locks
-# 锁顺序：始终在其他锁之前获取 _io_lock
-# This prevents deadlock when multiple modules interact
+# Lock ordering: Always acquire _io_lock before any other locks | 锁顺序：始终在其他锁之前获取 _io_lock
+# This prevents deadlock when multiple modules interact | 这可防止多个模块交互时发生死锁
 _io_lock = Semaphore(4)
-_last_known_mtime = {}  # Track file mtimes for cache invalidation
+_last_known_mtime = {}  # Track file mtimes for cache invalidation | 跟踪文件 mtime 用于缓存失效
 
 @contextmanager
 def _acquire_io_lock(timeout: float = 2.0):
@@ -106,16 +105,16 @@ geo_map_en = {
 
 def resolve_loc(city: str, state: str, country: str) -> Tuple[str, str]:
     """Resolve location to bilingual format | 解析地理位置为双语格式"""
-    # MEDIUM #4 fix: More robust Chinese character detection
+    # More robust Chinese character detection | 更健壮的中文字符检测
     def contains_chinese(text: str) -> bool:
-        """Check if text contains Chinese characters"""
+        """Check if text contains Chinese characters | 检查文本是否包含中文字符"""
         for char in text:
             if '\u4e00' <= char <= '\u9fff' or '\u3400' <= char <= '\u4dbf' or '\uf900' <= char <= '\ufaff':
                 return True
         return False
 
     if contains_chinese(country):
-        # Country name is in Chinese, reverse lookup
+        # Country name is in Chinese, reverse lookup | 国家名为中文，反向查找
         for k, v in geo_map_cn.items():
             if country == v:
                 country_cn = v
@@ -132,23 +131,13 @@ def resolve_loc(city: str, state: str, country: str) -> Tuple[str, str]:
     return loc_en, loc_cn
 
 def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
-    """
-    Lookup callsign info with file mtime for cache invalidation
-    查找呼号信息（带文件修改时间缓存失效）
-
-    Args:
-        id_file: Path to ID file
-        callsign: Callsign to lookup
-
-    Returns:
-        Dict with name, loc_en, loc_cn
-    """
+    """Lookup callsign info with file mtime for cache invalidation | 查找呼号信息（带文件修改时间缓存失效）"""
     try:
         mtime = os.path.getmtime(id_file)
     except OSError:
         mtime = 0
 
-    # Clear cache if file was modified (HIGH #5 fix)
+    # Clear cache if file was modified | 如果文件被修改则清除缓存
     global _last_known_mtime
     if id_file in _last_known_mtime and _last_known_mtime[id_file] != mtime:
         old_size = _lookup_cached.cache_info().currsize
@@ -162,21 +151,10 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
 
 @lru_cache(maxsize=4096)
 def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
-    """
-    Cached lookup with mtime-based invalidation
-    带 mtime 失效的缓存查找
-
-    Args:
-        id_file: Path to ID file
-        callsign: Callsign to lookup
-        mtime: File modification time for cache key
-
-    Returns:
-        Dict with name, loc_en, loc_cn
-    """
+    """Cached lookup with mtime-based invalidation | 带 mtime 失效的缓存查找"""
     default_result = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
 
-    # LOW #15 fix: Log cache statistics less frequently (every 5000 instead of 1000)
+    # Log cache statistics less frequently | 降低缓存统计日志频率
     cache_info = _lookup_cached.cache_info()
     total_ops = cache_info.hits + cache_info.misses
     if total_ops > 0 and total_ops % 5000 == 0:
@@ -185,21 +163,21 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
             f"Cache stats: hits={cache_info.hits}, misses={cache_info.misses}, "
             f"hit_rate={hit_rate:.1f}%, size={cache_info.currsize}/{cache_info.maxsize}"
         )
-        # MEDIUM #6 fix: Warn if cache is near capacity
+        # Warn if cache is near capacity | 如果缓存接近容量则警告
         if cache_info.currsize >= cache_info.maxsize * 0.9:
             logging.getLogger(__name__).warning(
                 f"Cache near capacity: {cache_info.currsize}/{cache_info.maxsize} entries"
             )
 
-    # Use context manager to ensure lock is always released (CRITICAL #1 fix)
+    # Use context manager to ensure lock is always released | 使用上下文管理器确保锁总是被释放
     try:
-        # MEDIUM #13 fix: Use timeout on lock acquisition to prevent indefinite blocking
+        # Use timeout on lock acquisition to prevent indefinite blocking | 使用超时防止无限阻塞
         with _acquire_io_lock(timeout=2.0):
             file_size = os.path.getsize(id_file)
             if file_size == 0:
                 return default_result
 
-            # Explicit file/mmap management to prevent FD leak (HIGH #6 fix)
+            # Explicit file/mmap management to prevent FD leak | 显式文件/mmap 管理防止文件描述符泄漏
             f = None
             mm = None
             try:
@@ -220,7 +198,7 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 try:
                     line = line_bytes.decode("utf-8")
                 except UnicodeDecodeError as e:
-                    # LOW #18 fix: Log decode error with details
+                    # Log decode error with details | 记录解码错误详情
                     logging.getLogger(__name__).debug(
                         f"UTF-8 decode failed at position {e.start}-{e.end}, "
                         f"falling back to gb18030: {e.reason}"
@@ -239,7 +217,7 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
                 return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
 
             finally:
-                # Ensure resources are cleaned up even on exception (HIGH #7 fix)
+                # Ensure resources are cleaned up even on exception | 确保即使异常也清理资源
                 if mm is not None:
                     try:
                         mm.close()
@@ -262,7 +240,9 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
         return default_result
 
 class Identity:
+    """Callsign identity lookup service | 呼号身份查询服务"""
     def __init__(self, id_file: str):
         self.id_file = id_file
     def get_info(self, callsign: str) -> Dict[str, str]:
+        """Get callsign information | 获取呼号信息"""
         return _lookup(self.id_file, callsign)

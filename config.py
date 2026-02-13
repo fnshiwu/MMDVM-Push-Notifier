@@ -7,11 +7,12 @@ from threading import Lock
 from typing import Dict
 
 class ConfigManager:
+    """Configuration manager with hot-reload support | 支持热重载的配置管理器"""
     _config: Dict = {}
     _last_mtime: float = 0.0
-    _check_interval: int = 30  # 从5秒优化为30秒
+    _check_interval: int = 30  # Check interval in seconds | 检查间隔（秒）
     _last_check_time: float = 0.0
-    _lock = Lock()
+    _lock = Lock()  # Thread-safe lock | 线程安全锁
 
     @staticmethod
     def _validate_url(url: str) -> str:
@@ -44,6 +45,7 @@ class ConfigManager:
 
     @classmethod
     def _validate_config(cls, raw: Dict) -> Dict:
+        """Validate and sanitize configuration | 验证并清理配置"""
         defaults = {
             "my_callsign": "",
             "min_duration": 4.0,
@@ -54,7 +56,7 @@ class ConfigManager:
             "boot_push_enabled": True,
             "temp_alert_enabled": True,
             "temp_threshold": 65.0,
-            "temp_interval": 30,  # Temperature check interval in SECONDS (温度检查间隔，单位：秒)
+            "temp_interval": 30,  # Temperature check interval in seconds | 温度检查间隔（秒）
             "temp_unit": "C",
             "ignore_list": "", "focus_list": "", "ui_lang": "cn"
         }
@@ -68,7 +70,7 @@ class ConfigManager:
             unit = str(conf.get("temp_unit", "C")).upper()
             conf["temp_unit"] = "F" if unit == "F" else "C"
 
-            # Validate URLs and tokens
+            # Validate URLs and tokens | 验证 URL 和 Token
             conf["fs_webhook"] = cls._validate_url(conf.get("fs_webhook", ""))
             conf["wx_token"] = cls._validate_token(conf.get("wx_token", ""), min_length=10)
             conf["tg_token"] = cls._validate_token(conf.get("tg_token", ""), min_length=20)
@@ -84,12 +86,12 @@ class ConfigManager:
         return conf
     @classmethod
     def get_config(cls, path: str = "/etc/mmdvm_push.json") -> Dict:
-        """Get configuration with thread-safe reload (HIGH #5 fix)"""
+        """Get configuration with thread-safe hot-reload | 获取配置（线程安全热重载）"""
         now = time.time()
 
-        # MEDIUM #3 fix: Always acquire lock for thread safety
+        # Thread-safe configuration access | 线程安全的配置访问
         with cls._lock:
-            # Check under lock to avoid redundant reads
+            # Check under lock to avoid redundant reads | 在锁内检查避免冗余读取
             if now - cls._last_check_time < cls._check_interval:
                 return cls._config
 

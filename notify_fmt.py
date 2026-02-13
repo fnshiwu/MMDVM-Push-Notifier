@@ -5,8 +5,7 @@
 from datetime import datetime
 
 def format_message(conf: dict, event: dict, temp_str: str, info: dict):
-    # Build type label and body text according to UI language
-    # 根据界面语言生成类型标签与正文 (LOW #14 fix: optimized string building)
+    """Build type label and body text according to UI language | 根据界面语言生成类型标签与正文"""
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
     call = event['call']
     target = event['target']

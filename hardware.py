@@ -11,11 +11,11 @@ import re
 from typing import Tuple, Dict
 
 # Constants for performance tuning | 性能调优常量
-CPU_CACHE_TIMEOUT = 3.0  # CPU 缓存超时（秒）
-TEMP_MIN_CELSIUS = -50.0  # 最低温度（摄氏度）
-TEMP_MAX_CELSIUS = 150.0  # 最高温度（摄氏度）
-SUBPROCESS_TIMEOUT = 5  # 子进程超时（秒）
-SECONDS_PER_DAY = 86400  # 一天的秒数
+CPU_CACHE_TIMEOUT = 3.0  # CPU cache timeout in seconds | CPU 缓存超时（秒）
+TEMP_MIN_CELSIUS = -50.0  # Minimum temperature in Celsius | 最低温度（摄氏度）
+TEMP_MAX_CELSIUS = 150.0  # Maximum temperature in Celsius | 最高温度（摄氏度）
+SUBPROCESS_TIMEOUT = 5  # Subprocess timeout in seconds | 子进程超时（秒）
+SECONDS_PER_DAY = 86400  # Seconds per day | 一天的秒数
 
 
 class Hardware:
@@ -24,12 +24,12 @@ class Hardware:
     def __init__(self):
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
-        self._last_cpu_read = 0.0  # CPU 缓存时间戳
-        self._cached_cpu = "0"     # CPU 缓存值
-        self._cache_start_time = time.time()  # MEDIUM #12 fix: track cache age
+        self._last_cpu_read = 0.0  # CPU cache timestamp | CPU 缓存时间戳
+        self._cached_cpu = "0"     # CPU cached value | CPU 缓存值
+        self._cache_start_time = time.time()  # Track cache age | 跟踪缓存年龄
 
     def _reset_cpu_cache_if_needed(self):
-        """Reset CPU cache after 24 hours to prevent overflow (MEDIUM #12 fix)"""
+        """Reset CPU cache after 24 hours to prevent overflow | 24小时后重置 CPU 缓存防止溢出"""
         if time.time() - self._cache_start_time > SECONDS_PER_DAY:
             self._cpu_prev_total = None
             self._cpu_prev_idle = None
@@ -37,14 +37,11 @@ class Hardware:
             self._cache_start_time = time.time()
             logging.getLogger(__name__).info("CPU cache reset after 24 hours")
     def _cpu_percent_top(self) -> str:
-        """
-        Get system CPU usage using top command
-        使用 top 命令获取系统 CPU 占用率
-        """
-        # Reset cache if needed (MEDIUM #12 fix)
+        """Get system CPU usage using top command | 使用 top 命令获取系统 CPU 占用率"""
+        # Reset cache if needed | 如需要则重置缓存
         self._reset_cpu_cache_if_needed()
 
-        # 如果距离上次读取不到3秒，直接返回缓存值
+        # Return cached value if within timeout | 如果在超时时间内则返回缓存值
         now = time.time()
         if now - self._last_cpu_read < CPU_CACHE_TIMEOUT:
             return self._cached_cpu
@@ -59,7 +56,7 @@ class Hardware:
             )
             out = result.stdout
             if out:
-                # Search for Cpu(s) line
+                # Search for Cpu(s) line | 搜索 Cpu(s) 行
                 for line in out.splitlines():
                     if 'Cpu(s)' in line or 'cpu(s)' in line.lower():
                         out = line
@@ -85,9 +82,9 @@ class Hardware:
                     return result_str
         except Exception as e:
             logging.getLogger(__name__).debug(f"top command failed: {e}")
-            # Fallthrough to /proc/stat fallback
+            # Fallthrough to /proc/stat fallback | 降级到 /proc/stat
 
-        # Fallback to /proc/stat
+        # Fallback to /proc/stat | 降级到 /proc/stat
         try:
             return self._cpu_from_proc_stat()
         except Exception as e:
@@ -95,16 +92,7 @@ class Hardware:
             return self._cached_cpu if self._cached_cpu else "0"
 
     def _parse_proc_stat_line(self, parts: list) -> Tuple[int, int]:
-        """
-        Parse /proc/stat line and return (total, idle)
-        解析 /proc/stat 行返回 (总计, 空闲)
-
-        Args:
-            parts: Split line from /proc/stat
-
-        Returns:
-            Tuple of (total_cpu_time, idle_cpu_time)
-        """
+        """Parse /proc/stat line and return (total, idle) | 解析 /proc/stat 行返回 (总计, 空闲)"""
         if not parts or parts[0] != "cpu":
             return 0, 0
         nums = [int(x) for x in parts[1:]]
@@ -122,13 +110,7 @@ class Hardware:
         return total, idle_all
 
     def _cpu_from_proc_stat(self) -> str:
-        """
-        Get CPU from /proc/stat with caching
-        从 /proc/stat 获取 CPU（带缓存）
-
-        Returns:
-            CPU usage percentage as string (e.g., "45.2")
-        """
+        """Get CPU from /proc/stat with caching | 从 /proc/stat 获取 CPU（带缓存）"""
         now = time.time()
 
         with open("/proc/stat", "r") as f:
@@ -141,7 +123,7 @@ class Hardware:
         prev_idle = self._cpu_prev_idle
 
         if prev_total is None or prev_idle is None:
-            # First call: sleep and measure again
+            # First call: sleep and measure again | 首次调用：休眠后再次测量
             time.sleep(1.0)
             with open("/proc/stat", "r") as f2:
                 parts2 = f2.readline().split()
@@ -160,7 +142,7 @@ class Hardware:
             self._cached_cpu = result
             return result
 
-        # Use cached previous values
+        # Use cached previous values | 使用缓存的先前值
         self._cpu_prev_total = total
         self._cpu_prev_idle = idle_all
         totald = total - prev_total
@@ -173,13 +155,7 @@ class Hardware:
         return result
 
     def _mem_percent_proc(self) -> str:
-        """
-        Get memory usage from /proc/meminfo
-        从 /proc/meminfo 获取内存占用率
-
-        Returns:
-            Memory usage percentage as string (e.g., "65.3%")
-        """
+        """Get memory usage from /proc/meminfo | 从 /proc/meminfo 获取内存占用率"""
         mt = ma = None
         with open("/proc/meminfo", "r") as f:
             for line in f:
@@ -189,16 +165,13 @@ class Hardware:
                     ma = float(line.split()[1])
                 if mt is not None and ma is not None:
                     break
-        if mt and ma and mt > 0:  # ISSUE #4 fix: check mt > 0
+        if mt and ma and mt > 0:  # Check mt > 0 to prevent division by zero | 检查 mt > 0 防止除零
             used = (mt - ma) / mt * 100.0
             return f"{used:.1f}%"
         return "0%"
 
     def _cpu_percent_process(self, interval: float = 1.0) -> str:
-        """
-        Get process CPU usage by reading /proc/stat
-        通过读取 /proc/stat 获取进程 CPU 占用率
-        """
+        """Get process CPU usage by reading /proc/stat | 通过读取 /proc/stat 获取进程 CPU 占用率"""
         try:
             pid = os.getpid()
             with open("/proc/stat", "r") as f:
@@ -237,10 +210,7 @@ class Hardware:
             return "0"
 
     def _cpu_percent_process_top(self) -> str:
-        """
-        Get process CPU usage using ps command
-        使用 ps 命令获取进程 CPU 占用率
-        """
+        """Get process CPU usage using ps command | 使用 ps 命令获取进程 CPU 占用率"""
         try:
             pid = os.getpid()
             result = subprocess.run(
@@ -260,13 +230,7 @@ class Hardware:
             return self._cpu_percent_process(interval=1.0)
 
     def get_sys_info(self) -> Tuple[str, str, str]:
-        """
-        Get system information: IP, CPU, memory
-        获取系统信息：IP、CPU、内存
-
-        Returns:
-            Tuple of (ip, cpu_percent, mem_percent)
-        """
+        """Get system information: IP, CPU, memory | 获取系统信息：IP、CPU、内存"""
         try:
             result = subprocess.run(
                 ["hostname", "-I"],
@@ -275,7 +239,7 @@ class Hardware:
                 timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
-            # ISSUE #17 fix: check array before accessing
+            # Check array before accessing | 访问前检查数组
             ip_parts = result.stdout.split()
             ip = ip_parts[0] if ip_parts else "Unknown"
         except (IndexError, Exception):
@@ -286,7 +250,7 @@ class Hardware:
         except Exception as e:
             logging.getLogger(__name__).debug(f"Memory read from /proc failed: {e}")
             try:
-                # SECURITY: Use array form to avoid shell injection
+                # Use array form to avoid shell injection | 使用数组形式避免 shell 注入
                 result = subprocess.run(
                     ["free", "-m"],
                     capture_output=True,
@@ -295,7 +259,7 @@ class Hardware:
                     check=False
                 )
                 if result.returncode == 0 and result.stdout:
-                    # Parse free output manually instead of using awk
+                    # Parse free output manually | 手动解析 free 输出
                     lines = result.stdout.strip().split('\n')
                     if len(lines) >= 2:
                         parts = lines[1].split()
@@ -321,24 +285,12 @@ class Hardware:
         return ip, cpu, mem
 
     def get_current_temp(self, conf: Dict) -> Tuple[str, float]:
-        """
-        Get current system temperature (MEDIUM #10 fix: distinguish error types)
-        获取当前系统温度
-
-        Args:
-            conf: Configuration dict with temp_unit setting
-
-        Returns:
-            Tuple of (formatted_string, raw_value)
-            - ("N/A", -1.0) if sensor not available
-            - ("ERROR", -2.0) if sensor read error
-            - (formatted, value) if successful
-        """
+        """Get current system temperature | 获取当前系统温度"""
         try:
             with open("/sys/class/thermal/thermal_zone0/temp", "r") as f:
                 temp_c = float(f.read().strip()) / 1000.0
 
-            # Validate temperature is within reasonable bounds
+            # Validate temperature is within reasonable bounds | 验证温度在合理范围内
             if temp_c < TEMP_MIN_CELSIUS or temp_c > TEMP_MAX_CELSIUS:
                 logging.getLogger(__name__).warning(f"Temperature out of range: {temp_c}°C")
                 return "ERROR", -2.0
@@ -348,10 +300,10 @@ class Hardware:
             return f"{val:.1f}°{unit}", val
 
         except FileNotFoundError:
-            # Sensor not available (expected on some systems)
+            # Sensor not available (expected on some systems) | 传感器不可用（某些系统上预期）
             return "N/A", -1.0
         except (ValueError, OSError) as e:
-            # Sensor read error (unexpected)
+            # Sensor read error (unexpected) | 传感器读取错误（意外）
             logging.getLogger(__name__).error(f"Temperature sensor error: {e}")
             return "ERROR", -2.0
 
