@@ -34,6 +34,7 @@ class Hardware:
             self._cpu_prev_total = None
             self._cpu_prev_idle = None
             self._last_cpu_read = 0.0
+            self._cached_cpu = "0"  # Also reset cached value | 同时重置缓存值
             self._cache_start_time = time.time()
             logging.getLogger(__name__).info("CPU cache reset after 24 hours")
     def _cpu_percent_top(self) -> str:
@@ -80,6 +81,8 @@ class Hardware:
                     self._last_cpu_read = now
                     self._cached_cpu = result_str
                     return result_str
+        except subprocess.TimeoutExpired:
+            logging.getLogger(__name__).debug("top command timeout")
         except Exception as e:
             logging.getLogger(__name__).debug(f"top command failed: {e}")
             # Fallthrough to /proc/stat fallback | 降级到 /proc/stat
@@ -225,6 +228,9 @@ class Hardware:
                 return self._cpu_percent_process(interval=1.0)
             cpu_val = float(val)
             return f"{cpu_val:.1f}"
+        except subprocess.TimeoutExpired:
+            logging.getLogger(__name__).debug("ps command timeout")
+            return self._cpu_percent_process(interval=1.0)
         except Exception as e:
             logging.getLogger(__name__).debug(f"ps command failed: {e}")
             return self._cpu_percent_process(interval=1.0)
@@ -242,6 +248,9 @@ class Hardware:
             # Check array before accessing | 访问前检查数组
             ip_parts = result.stdout.split()
             ip = ip_parts[0] if ip_parts else "Unknown"
+        except subprocess.TimeoutExpired:
+            logging.getLogger(__name__).debug("hostname command timeout")
+            ip = "Unknown"
         except (IndexError, Exception):
             ip = "Unknown"
         cpu = self._cpu_percent_top()
@@ -279,6 +288,9 @@ class Hardware:
                         mem = "0%"
                 else:
                     mem = "0%"
+            except subprocess.TimeoutExpired:
+                logging.getLogger(__name__).debug("free command timeout")
+                mem = "0%"
             except Exception as e2:
                 logging.getLogger(__name__).debug(f"Memory read from free failed: {e2}")
                 mem = "0%"

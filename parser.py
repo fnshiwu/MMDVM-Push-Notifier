@@ -18,8 +18,7 @@ _re_master = re.compile(
 def parse_line(line: str):
     # Parse a single log line; return event dict or None
     # 解析单行日志；返回事件字典或 None
-    if "end of" not in line.lower():
-        return None
+    # Optimized: use regex directly without lower() | 优化：直接使用正则表达式，无需 lower()
     m = _re_master.search(line)
     if not m:
         return None

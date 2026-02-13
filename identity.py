@@ -177,57 +177,40 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
             if file_size == 0:
                 return default_result
 
-            # Explicit file/mmap management to prevent FD leak | 显式文件/mmap 管理防止文件描述符泄漏
-            f = None
-            mm = None
-            try:
-                f = open(id_file, "rb")
-                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+            # Use context managers for automatic resource cleanup | 使用上下文管理器自动清理资源
+            with open(id_file, "rb") as f:
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                    query = f",{callsign},".encode("utf-8")
+                    idx = mm.find(query)
+                    if idx == -1:
+                        return default_result
 
-                query = f",{callsign},".encode("utf-8")
-                idx = mm.find(query)
-                if idx == -1:
-                    return default_result
+                    start = mm.rfind(b"\n", 0, idx) + 1
+                    end = mm.find(b"\n", idx)
+                    if end == -1:
+                        end = len(mm)
+                    line_bytes = mm[start:end]
 
-                start = mm.rfind(b"\n", 0, idx) + 1
-                end = mm.find(b"\n", idx)
-                if end == -1:
-                    end = len(mm)
-                line_bytes = mm[start:end]
-
-                try:
-                    line = line_bytes.decode("utf-8")
-                except UnicodeDecodeError as e:
-                    # Log decode error with details | 记录解码错误详情
-                    logging.getLogger(__name__).debug(
-                        f"UTF-8 decode failed at position {e.start}-{e.end}, "
-                        f"falling back to gb18030: {e.reason}"
-                    )
-                    line = line_bytes.decode("gb18030", errors="replace")
-
-                parts = line.split(",")
-                first_name = parts[2].strip() if len(parts) > 2 else ""
-                last_name = parts[3].strip() if len(parts) > 3 else ""
-                city = parts[4].strip().title() if len(parts) > 4 else ""
-                state = parts[5].strip().upper() if len(parts) > 5 else ""
-                country = parts[6].strip() if len(parts) > 6 else ""
-                loc_en, loc_cn = resolve_loc(city, state, country)
-                full_name = f"{first_name} {last_name}".strip().upper()
-                name_part = f" ({full_name})" if full_name else ""
-                return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
-
-            finally:
-                # Ensure resources are cleaned up even on exception | 确保即使异常也清理资源
-                if mm is not None:
                     try:
-                        mm.close()
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(f"Failed to close mmap: {e}")
-                if f is not None:
-                    try:
-                        f.close()
-                    except Exception as e:
-                        logging.getLogger(__name__).warning(f"Failed to close file: {e}")
+                        line = line_bytes.decode("utf-8")
+                    except UnicodeDecodeError as e:
+                        # Log decode error with details | 记录解码错误详情
+                        logging.getLogger(__name__).debug(
+                            f"UTF-8 decode failed at position {e.start}-{e.end}, "
+                            f"falling back to gb18030: {e.reason}"
+                        )
+                        line = line_bytes.decode("gb18030", errors="replace")
+
+                    parts = line.split(",")
+                    first_name = parts[2].strip() if len(parts) > 2 else ""
+                    last_name = parts[3].strip() if len(parts) > 3 else ""
+                    city = parts[4].strip().title() if len(parts) > 4 else ""
+                    state = parts[5].strip().upper() if len(parts) > 5 else ""
+                    country = parts[6].strip() if len(parts) > 6 else ""
+                    loc_en, loc_cn = resolve_loc(city, state, country)
+                    full_name = f"{first_name} {last_name}".strip().upper()
+                    name_part = f" ({full_name})" if full_name else ""
+                    return {"name": name_part, "loc_en": loc_en, "loc_cn": loc_cn}
 
     except TimeoutError:
         logging.getLogger(__name__).warning(f"IO lock timeout: {callsign}")

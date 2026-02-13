@@ -5,6 +5,11 @@ import logging
 import urllib.parse
 from threading import Lock
 from typing import Dict
+from copy import deepcopy
+
+# Global constants | 全局常量
+PUSH_MAX_WORKERS = 3  # Maximum push worker threads | 最大推送工作线程数
+PUSH_RETRY = 2  # Number of push retries | 推送重试次数
 
 class ConfigManager:
     """Configuration manager with hot-reload support | 支持热重载的配置管理器"""
@@ -93,12 +98,13 @@ class ConfigManager:
         with cls._lock:
             # Check under lock to avoid redundant reads | 在锁内检查避免冗余读取
             if now - cls._last_check_time < cls._check_interval:
-                return cls._config
+                # Return deep copy to prevent external modification | 返回深拷贝防止外部修改
+                return deepcopy(cls._config)
 
             cls._last_check_time = now
 
             if not os.path.exists(path):
-                return cls._config
+                return deepcopy(cls._config)
 
             try:
                 mtime = os.path.getmtime(path)
@@ -109,8 +115,15 @@ class ConfigManager:
                     cls._last_mtime = mtime
                     logging.getLogger(__name__).info(f"Config reloaded from {path}")
             except json.JSONDecodeError as e:
-                logging.getLogger(__name__).error(f"Config JSON parse error: {e}")
+                logging.getLogger(__name__).error(
+                    f"Config JSON parse error in {path}: {e}. "
+                    f"Using previous configuration. Please fix the JSON syntax."
+                )
+                # If this is the first load and config is empty, raise exception | 如果是首次加载且配置为空，抛出异常
+                if not cls._config:
+                    raise ValueError(f"Initial config load failed: invalid JSON in {path}") from e
             except OSError as e:
                 logging.getLogger(__name__).error(f"Config file read error: {e}")
 
-            return cls._config
+            # Return deep copy to prevent external modification | 返回深拷贝防止外部修改
+            return deepcopy(cls._config)

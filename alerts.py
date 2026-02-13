@@ -29,8 +29,9 @@ class AlertManager:
         """
         now = time.time()
 
-        # Rate limiting: check at most once per minute
-        if now - self.last_temp_check_time < 60:
+        # Use configurable temp_interval instead of hardcoded 60 seconds | 使用可配置的 temp_interval 而非硬编码的60秒
+        temp_interval = int(conf.get('temp_interval', 30))
+        if now - self.last_temp_check_time < temp_interval:
             return None
 
         self.last_temp_check_time = now

@@ -52,6 +52,11 @@ def quiet_time(conf: dict) -> bool:
         logging.getLogger(__name__).warning(f"Invalid quiet time format: start={start}, end={end}")
         return False
 
+    # Special case: if start == end, disable quiet mode (avoid all-day quiet) | 特殊情况：如果开始==结束，禁用静音模式（避免全天静音）
+    if start == end:
+        logging.getLogger(__name__).info(f"Quiet mode disabled: start time equals end time ({start})")
+        return False
+
     if start <= end:
         return start <= now <= end
     return now >= start or now <= end
@@ -63,13 +68,17 @@ def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
     my_callsign = (conf.get('my_callsign', '') or '').upper()
     min_duration = float(conf.get('min_duration', 1.0))
     call = event['call']
+    target = event['target']
     dur = float(event['dur'])
     if focus and call not in focus:
         return False
     if call == my_callsign or call in ignore or dur < min_duration:
         return False
     curr_ts = time.time()
-    if call == (last_msg.get("call") or "") and (curr_ts - float(last_msg.get("ts") or 0)) < 3:
+    # Improved deduplication: check both call and target | 改进的去重：同时检查呼号和目标
+    if (call == (last_msg.get("call") or "") and
+        target == (last_msg.get("target") or "") and
+        (curr_ts - float(last_msg.get("ts") or 0)) < 3):
         return False
     return True
 def should_temp_alert(conf: dict, last_alert_time: float, now: float, current_val: float) -> bool:

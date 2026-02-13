@@ -10,8 +10,13 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict
 
-PUSH_MAX_WORKERS = 3
-PUSH_RETRY = 2
+# Import constants from config module | 从 config 模块导入常量
+try:
+    from config import PUSH_MAX_WORKERS, PUSH_RETRY
+except ImportError:
+    # Fallback if config module not available | 如果 config 模块不可用则使用默认值
+    PUSH_MAX_WORKERS = 3
+    PUSH_RETRY = 2
 
 class PushService:
     """Multi-platform push notification service | 多平台推送通知服务"""
@@ -68,7 +73,8 @@ class PushService:
             br = "<br>"
             html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
             payload = {"token": config["wx_token"], "title": type_label, "content": html_content, "template": "html"}
-            cls.post_with_retry("http://www.pushplus.plus/send", data=json.dumps(payload).encode("utf-8"), is_json=True)
+            # Use HTTPS for security | 使用 HTTPS 保证安全
+            cls.post_with_retry("https://www.pushplus.plus/send", data=json.dumps(payload).encode("utf-8"), is_json=True)
         except Exception as e:
             logging.getLogger(__name__).error(f"WeChat push failed: {e}")
     @classmethod
@@ -114,12 +120,16 @@ class PushService:
             return
 
         if async_mode:
+            executor_available = False
             with cls._executor_lock:
                 if cls._executor is not None:
                     cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
-                else:
-                    logging.getLogger(__name__).warning("Executor shutdown during send, executing synchronously")
-                    cls._do_push_logic(config, type_label, body_text, is_voice)
+                    executor_available = True
+
+            # Drop notification if executor was shutdown | 如果执行器已关闭，丢弃通知
+            if not executor_available:
+                logging.getLogger(__name__).warning("Executor shutdown during send, dropping notification")
+                return
         else:
             cls._do_push_logic(config, type_label, body_text, is_voice)
     @classmethod
