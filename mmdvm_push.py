@@ -26,7 +26,7 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.4.2"
+VERSION = "v3.4.3"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
@@ -294,6 +294,7 @@ if __name__ == "__main__":
                 "config_valid": True,
                 "ip": ip,
                 "cpu_system": f"{cpu_sys}%",
+                "mem": mem_sys,
                 "cpu_process": f"{cpu_proc}%",
                 "mem_rss_kb": rss_kb,
                 "time": datetime.now().isoformat(timespec="seconds")
