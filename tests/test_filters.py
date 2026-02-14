@@ -25,14 +25,14 @@ class TestFilters(unittest.TestCase):
 
     def test_should_push_focus_and_min_duration(self):
         conf = {'focus_list': 'FOO', 'ignore_list': '', 'my_callsign': 'MYCALL', 'min_duration': 5}
-        event = {'call': 'FOO', 'dur': 6}
+        event = {'call': 'FOO', 'dur': 6, 'target': 'TG1'}
         last_msg = {}
         self.assertTrue(should_push(conf, event, last_msg))
 
     def test_should_push_ignore_and_self(self):
         conf = {'focus_list': '', 'ignore_list': 'BAR', 'my_callsign': 'MYCALL', 'min_duration': 1}
-        event1 = {'call': 'BAR', 'dur': 10}
-        event2 = {'call': 'MYCALL', 'dur': 10}
+        event1 = {'call': 'BAR', 'dur': 10, 'target': 'TG1'}
+        event2 = {'call': 'MYCALL', 'dur': 10, 'target': 'TG1'}
         self.assertFalse(should_push(conf, event1, {}))
         self.assertFalse(should_push(conf, event2, {}))
 
