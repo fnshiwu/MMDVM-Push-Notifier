@@ -50,7 +50,10 @@ class ConfigManager:
 
     @classmethod
     def _validate_config(cls, raw: Dict) -> Dict:
-        """Validate and sanitize configuration | 验证并清理配置"""
+        """
+        Validate and sanitize configuration
+        验证并清洗配置
+        """
         defaults = {
             "my_callsign": "",
             "min_duration": 4.0,
@@ -61,44 +64,64 @@ class ConfigManager:
             "boot_push_enabled": True,
             "temp_alert_enabled": True,
             "temp_threshold": 65.0,
-            "temp_interval": 30,  # Temperature check interval in seconds | 温度检查间隔（秒）
+            "temp_interval": 30,  # Default 30 minutes | 默认30分钟
             "temp_unit": "C",
             "ignore_list": "", "focus_list": "", "ui_lang": "cn"
         }
+        
+        # Merge with defaults
         conf = dict(defaults)
         if isinstance(raw, dict):
             conf.update(raw)
+            
         try:
+            # Numeric validations
             conf["min_duration"] = max(0.1, float(conf.get("min_duration", defaults["min_duration"])))
             conf["temp_threshold"] = max(0.0, min(150.0, float(conf.get("temp_threshold", defaults["temp_threshold"]))))
-            conf["temp_interval"] = max(10, int(conf.get("temp_interval", defaults["temp_interval"])))
+            
+            # === CRITICAL FIX: Unit Conversion (The "Unit Schizophrenia") ===
+            # Web UI inputs Minutes, Backend needs Seconds.
+            # Web UI 输入为分钟，后端需要转换为秒。
+            raw_interval = int(conf.get("temp_interval", defaults["temp_interval"]))
+            # Enforce minimum 1 minute (60 seconds)
+            conf["temp_interval"] = max(1, raw_interval) * 60 
+
+            # Unit normalization
             unit = str(conf.get("temp_unit", "C")).upper()
             conf["temp_unit"] = "F" if unit == "F" else "C"
 
-            # Validate URLs and tokens | 验证 URL 和 Token
+            # Validate URLs and tokens
             conf["fs_webhook"] = cls._validate_url(conf.get("fs_webhook", ""))
             conf["wx_token"] = cls._validate_token(conf.get("wx_token", ""), min_length=10)
             conf["tg_token"] = cls._validate_token(conf.get("tg_token", ""), min_length=20)
 
+            # Quiet mode structure check
             qm = conf.get("quiet_mode", defaults["quiet_mode"])
+            if not isinstance(qm, dict):
+                qm = defaults["quiet_mode"]
             conf["quiet_mode"] = {
                 "enabled": bool(qm.get("enabled", False)),
-                "start": qm.get("start", "23:00"),
-                "end": qm.get("end", "07:00")
+                "start": str(qm.get("start", "23:00")),
+                "end": str(qm.get("end", "07:00"))
             }
+            
         except Exception as e:
             logging.getLogger(__name__).warning(f"Config sanitize error: {e}")
+            # Fallback to defaults for critical values if error occurs
+            if "temp_interval" not in conf:
+                conf["temp_interval"] = 1800 # 30 mins * 60
+
         return conf
+
     @classmethod
     def get_config(cls, path: str = "/etc/mmdvm_push.json") -> Dict:
-        """Get configuration with thread-safe hot-reload | 获取配置（线程安全热重载）"""
+        """Get configuration with thread-safe reload (HIGH #5 fix)"""
         now = time.time()
 
-        # Thread-safe configuration access | 线程安全的配置访问
+        # MEDIUM #3 fix: Always acquire lock for thread safety
         with cls._lock:
-            # Check under lock to avoid redundant reads | 在锁内检查避免冗余读取
+            # Check under lock to avoid redundant reads
             if now - cls._last_check_time < cls._check_interval:
-                # Return deep copy to prevent external modification | 返回深拷贝防止外部修改
                 return deepcopy(cls._config)
 
             cls._last_check_time = now
@@ -119,11 +142,10 @@ class ConfigManager:
                     f"Config JSON parse error in {path}: {e}. "
                     f"Using previous configuration. Please fix the JSON syntax."
                 )
-                # If this is the first load and config is empty, raise exception | 如果是首次加载且配置为空，抛出异常
                 if not cls._config:
-                    raise ValueError(f"Initial config load failed: invalid JSON in {path}") from e
+                    # Return defaults if initial load fails
+                    cls._config = cls._validate_config({})
             except OSError as e:
                 logging.getLogger(__name__).error(f"Config file read error: {e}")
 
-            # Return deep copy to prevent external modification | 返回深拷贝防止外部修改
             return deepcopy(cls._config)
