@@ -26,7 +26,7 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.4.1"
+VERSION = "v3.4.2"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
