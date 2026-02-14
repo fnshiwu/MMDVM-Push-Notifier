@@ -34,9 +34,9 @@ class TestCPUPercent(unittest.TestCase):
         m.return_value.readline.side_effect = fake_readline
         with patch.object(builtins, "open", m):
             mon = mp.MMDVMMonitor()
-            val = mon._cpu_percent_proc()
+            val = mon.hw._cpu_from_proc_stat()
             self.assertTrue(float(val) > 0.0)
-            v2 = mon._cpu_percent_proc()
+            v2 = mon.hw._cpu_from_proc_stat()
             self.assertTrue(float(v2) >= 0.0)
 
     def test_process_cpu_percent(self):
@@ -76,7 +76,7 @@ class TestCPUPercent(unittest.TestCase):
         with patch.object(builtins, "open", side_effect=fake_open):
             with patch("os.getpid", return_value=1234), patch("os.cpu_count", return_value=4):
                 mon = mp.MMDVMMonitor()
-                val = mon._cpu_percent_process(interval=0.01)
+                val = mon.hw._cpu_percent_process(interval=0.01)
                 self.assertTrue(0.0 <= float(val) <= 400.0)
 
 
