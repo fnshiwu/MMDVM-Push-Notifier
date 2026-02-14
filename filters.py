@@ -6,7 +6,6 @@
 from datetime import datetime
 import time
 import re
-import logging
 from functools import lru_cache
 
 _SPLIT_RE = re.compile(r'[;；]+')
@@ -34,32 +33,34 @@ def _validate_time(time_str: str) -> bool:
         if len(parts) != 2:
             return False
         h, m = int(parts[0]), int(parts[1])
-        return 0 <= h < 24 and 0 <= m < 60
-    except (ValueError, AttributeError):
+        return 0 <= h <= 23 and 0 <= m <= 59
+    except (ValueError, TypeError):
         return False
 
 def quiet_time(conf: dict) -> bool:
-    """Check if current time is in quiet mode window | 检查当前是否在静音时段"""
-    qc = conf.get('quiet_mode', {})
-    if not qc.get('enabled'):
+    """
+    Check if current time is within quiet hours
+    检查当前时间是否在静音时段内
+    """
+    qm = conf.get('quiet_mode', {})
+    if not isinstance(qm, dict) or not qm.get('enabled'):
         return False
-    now = datetime.now().strftime("%H:%M")
-    start = qc.get('start', '23:00')
-    end = qc.get('end', '07:00')
 
-    # Validate time formats | 验证时间格式
+    start = qm.get('start', '23:00')
+    end = qm.get('end', '07:00')
+
+    # Validate format to prevent errors
     if not _validate_time(start) or not _validate_time(end):
-        logging.getLogger(__name__).warning(f"Invalid quiet time format: start={start}, end={end}")
         return False
 
-    # Special case: if start == end, disable quiet mode (avoid all-day quiet) | 特殊情况：如果开始==结束，禁用静音模式（避免全天静音）
-    if start == end:
-        logging.getLogger(__name__).info(f"Quiet mode disabled: start time equals end time ({start})")
-        return False
+    now_dt = datetime.now()
+    now = now_dt.strftime("%H:%M")
 
     if start <= end:
         return start <= now <= end
-    return now >= start or now <= end
+    else:
+        # Cross-day setting (e.g. 23:00 to 07:00)
+        return now >= start or now <= end
 
 def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
     """Decide whether to push based on filters and deduplication | 根据过滤器和去重逻辑判断是否推送"""
@@ -67,27 +68,30 @@ def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
     ignore = _parse_list(conf.get('ignore_list', []))
     my_callsign = (conf.get('my_callsign', '') or '').upper()
     min_duration = float(conf.get('min_duration', 1.0))
+    
     call = event['call']
     target = event['target']
     dur = float(event['dur'])
+
+    # 1. Whitelist check (Focus list)
     if focus and call not in focus:
         return False
-    if call == my_callsign or call in ignore or dur < min_duration:
+
+    # 2. Blacklist check (Ignore list)
+    if call in ignore:
         return False
+
+    # 3. Self suppression & Duration check
+    if call == my_callsign or dur < min_duration:
+        return False
+
+    # 4. Deduplication logic
     curr_ts = time.time()
-    # Improved deduplication: check both call and target | 改进的去重：同时检查呼号和目标
+    # Improved deduplication: check both call and target
+    # 改进的去重：同时检查呼号和目标
     if (call == (last_msg.get("call") or "") and
         target == (last_msg.get("target") or "") and
         (curr_ts - float(last_msg.get("ts") or 0)) < 3):
         return False
+
     return True
-def should_temp_alert(conf: dict, last_alert_time: float, now: float, current_val: float) -> bool:
-    """Check if temperature alert should be sent | 检查是否应发送温度告警"""
-    if not conf.get('temp_alert_enabled'):
-        return False
-    threshold = float(conf.get('temp_threshold', 65.0))
-    if current_val < threshold:
-        return False
-    # temp_interval is in seconds | temp_interval 单位为秒
-    interval_sec = int(conf.get('temp_interval', 30))
-    return (now - last_alert_time) > interval_sec
