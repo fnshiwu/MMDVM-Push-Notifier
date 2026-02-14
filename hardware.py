@@ -11,6 +11,7 @@ import re
 from typing import Tuple, Dict
 
 # Constants for performance tuning | 性能调优常量
+CPU_CACHE_TIMEOUT = 3.0  # CPU cache timeout in seconds | CPU 缓存超时（秒）
 TEMP_MIN_CELSIUS = -50.0  # Minimum temperature in Celsius | 最低温度（摄氏度）
 TEMP_MAX_CELSIUS = 150.0  # Maximum temperature in Celsius | 最高温度（摄氏度）
 SUBPROCESS_TIMEOUT = 5  # Subprocess timeout in seconds | 子进程超时（秒）
@@ -23,6 +24,8 @@ class Hardware:
     def __init__(self):
         self._cpu_prev_total = None
         self._cpu_prev_idle = None
+        self._last_cpu_read = 0.0  # CPU cache timestamp | CPU 缓存时间戳
+        self._cached_cpu = "0"     # CPU cached value | CPU 缓存值
         self._cache_start_time = time.time()  # Track cache age | 跟踪缓存年龄
 
     def _reset_cpu_cache_if_needed(self):
@@ -30,8 +33,67 @@ class Hardware:
         if time.time() - self._cache_start_time > SECONDS_PER_DAY:
             self._cpu_prev_total = None
             self._cpu_prev_idle = None
+            self._last_cpu_read = 0.0
+            self._cached_cpu = "0"  # Also reset cached value | 同时重置缓存值
             self._cache_start_time = time.time()
             logging.getLogger(__name__).info("CPU cache reset after 24 hours")
+
+    def _cpu_percent_top(self) -> str:
+        """Get system CPU usage using top command | 使用 top 命令获取系统 CPU 占用率"""
+        # Reset cache if needed | 如需要则重置缓存
+        self._reset_cpu_cache_if_needed()
+
+        # Return cached value if within timeout | 如果在超时时间内则返回缓存值
+        now = time.time()
+        if now - self._last_cpu_read < CPU_CACHE_TIMEOUT:
+            return self._cached_cpu
+
+        try:
+            result = subprocess.run(
+                ["top", "-bn1"],
+                capture_output=True,
+                text=True,
+                timeout=SUBPROCESS_TIMEOUT,
+                check=False
+            )
+            out = result.stdout
+            if out:
+                # Search for Cpu(s) line | 搜索 Cpu(s) 行
+                for line in out.splitlines():
+                    if 'Cpu(s)' in line or 'cpu(s)' in line.lower() or line.strip().upper().startswith('CPU:'):
+                        out = line
+                        break
+                m = re.search(r'(\d+(?:\.\d+)?)\s*%?\s*id', out, re.IGNORECASE)
+                if m:
+                    idle = float(m.group(1))
+                    busy = max(0.0, min(100.0, 100.0 - idle))
+                    result_str = f"{busy:.1f}"
+                    self._last_cpu_read = now
+                    self._cached_cpu = result_str
+                    return result_str
+                comps = {}
+                for key in ("us", "sy", "ni", "wa", "hi", "si", "st"):
+                    m2 = re.search(r'(\d+(?:\.\d+)?)\s*' + key, out)
+                    if m2:
+                        comps[key] = float(m2.group(1))
+                if comps:
+                    busy = sum(comps.values())
+                    result_str = f"{busy:.1f}"
+                    self._last_cpu_read = now
+                    self._cached_cpu = result_str
+                    return result_str
+        except subprocess.TimeoutExpired:
+            logging.getLogger(__name__).debug("top command timeout")
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"top command failed: {e}")
+            # Fallthrough to /proc/stat fallback | 降级到 /proc/stat
+
+        # Fallback to /proc/stat | 降级到 /proc/stat
+        try:
+            return self._cpu_from_proc_stat()
+        except Exception as e:
+            logging.getLogger(__name__).debug(f"/proc/stat read failed: {e}")
+            return self._cached_cpu if self._cached_cpu else "0"
 
     def _parse_proc_stat_line(self, parts: list) -> Tuple[int, int]:
         """Parse /proc/stat line and return (total, idle) | 解析 /proc/stat 行返回 (总计, 空闲)"""
@@ -178,7 +240,7 @@ class Hardware:
         except (IndexError, Exception):
             ip = "Unknown"
             
-        cpu = self._cpu_from_proc_stat()
+        cpu = self._cpu_percent_top()
         mem = self._mem_percent_proc()
         return ip, cpu, mem
 
