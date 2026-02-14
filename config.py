@@ -127,6 +127,9 @@ class ConfigManager:
             cls._last_check_time = now
 
             if not os.path.exists(path):
+                # Ensure defaults are loaded if config is empty | 如果配置为空确保加载默认值
+                if not cls._config:
+                    cls._config = cls._validate_config({})
                 return deepcopy(cls._config)
 
             try:
