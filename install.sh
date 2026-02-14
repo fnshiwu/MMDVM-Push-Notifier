@@ -25,6 +25,8 @@ echo "1. Creating and setting directory permissions... | 正在创建并设置�
 INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
 mkdir -p $INSTALL_DIR
 id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-push
+# Ensure mmdvm-push is in www-data group to read config if owned by www-data | 确保用户在 www-data 组以读取配置
+usermod -a -G www-data mmdvm-push
 chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
 cd $INSTALL_DIR || { echo "错误: 无法进入目录 $INSTALL_DIR"; exit 1; }
@@ -71,6 +73,14 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-rw
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-ro
+www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-rw
+www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-ro
+www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,rw /
+www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,ro /
+www-data ALL=(ALL) NOPASSWD: /usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py *
+www-data ALL=(ALL) NOPASSWD: /home/pi-star/MMDVM-Push-Notifier/update.sh
 EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
