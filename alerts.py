@@ -49,6 +49,6 @@ class AlertManager:
         if current_val > threshold:
             # Threshold exceeded, generate alert message
             # 超过阈值，生成告警消息
-            return format_temp_alert(conf, display_str, current_val, threshold)
+            return format_temp_alert(conf, display_str, threshold)
             
         return None
