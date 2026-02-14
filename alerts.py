@@ -1,48 +1,54 @@
 # Alert management module | 告警管理模块
 #
-# Handles temperature and system alerts
-# 处理温度和系统告警
+# Handles temperature and system alerts logic
+# 处理温度和系统告警逻辑 (Logic decoupled from scheduling)
 
-import time
 from typing import Optional, Tuple, Dict
 from hardware import Hardware
-from filters import should_temp_alert
 from notify_fmt import format_temp_alert
 
-
 class AlertManager:
-    """Manages system alerts with rate limiting | 管理系统告警并限制频率"""
+    """
+    Manages system alerts logic.
+    管理系统告警逻辑。
+    
+    Refactored to remove internal scheduling/rate-limiting. 
+    Scheduling is now fully controlled by the main loop in mmdvm_push.py.
+    重构后移除了内部的调度/频率限制，现在完全由主循环控制。
+    """
 
     def __init__(self, hardware: Hardware):
         self.hardware = hardware
-        self.last_temp_alert_time: float = 0.0
-        self.last_temp_check_time: float = 0.0
 
     def check_temp_alert(self, conf: Dict) -> Optional[Tuple[str, str]]:
         """
-        Check if temperature alert should be triggered
-        检查是否应触发温度告警
+        Check if temperature alert should be triggered immediately.
+        检查是否应立即触发温度告警。
+
+        Args:
+            conf: Current configuration dictionary
 
         Returns:
             Tuple of (title, body) if alert should be sent, None otherwise
-            如果需要发送告警则返回 (标题, 正文)，否则返回 None
         """
-        now = time.time()
-
-        # Use configurable temp_interval instead of hardcoded 60 seconds | 使用可配置的 temp_interval 而非硬编码的60秒
-        temp_interval = int(conf.get('temp_interval', 30))
-        if now - self.last_temp_check_time < temp_interval:
+        # 1. Check if feature is enabled globally
+        if not conf.get('temp_alert_enabled', True):
             return None
 
-        self.last_temp_check_time = now
-
-        # Get current temperature
+        # 2. Get current hardware metrics
         display_str, current_val = self.hardware.get_current_temp(conf)
 
-        # Check if alert should be triggered
-        if should_temp_alert(conf, self.last_temp_alert_time, now, current_val):
-            self.last_temp_alert_time = now
-            threshold = float(conf.get("temp_threshold", 65.0))
-            return format_temp_alert(conf, display_str, threshold)
+        # Handle sensor errors
+        if current_val < -1.5:  # -2.0 is ERROR
+            return None
 
+        # 3. Check Threshold logic
+        # Get threshold from config (default 65.0)
+        threshold = float(conf.get('temp_threshold', 65.0))
+
+        if current_val > threshold:
+            # Threshold exceeded, generate alert message
+            # 超过阈值，生成告警消息
+            return format_temp_alert(conf, display_str, current_val, threshold)
+            
         return None
