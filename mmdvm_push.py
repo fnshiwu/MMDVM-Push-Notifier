@@ -290,6 +290,7 @@ if __name__ == "__main__":
                 "app_log_writable": os.access(APP_LOG_DIR, os.W_OK),
                 "mmdvm_log_dir": MMDVM_LOG_DIR,
                 "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
+                "config_exists": os.path.exists(CONFIG_FILE),
                 "config_valid": True,
                 "ip": ip,
                 "cpu_system": f"{cpu_sys}%",
