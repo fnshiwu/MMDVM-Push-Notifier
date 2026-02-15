@@ -74,9 +74,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update' && $valid_csrf) {
-        // Trigger one-click update script | 执行一键更新脚本
-        exec("sudo $updateScript 2>&1", $out, $res);
-        $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新指令已发出！服务正在重启..." : "🚀 Update triggered! Service restarting...";
+        // Trigger one-click update script in background | 后台执行一键更新脚本
+        exec("sudo $updateScript > /dev/null 2>&1 &");
+        $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新在后台进行中，请稍候刷新查看版本..." : "🚀 Update started in background, please refresh later...";
     } elseif (isset($_POST['action']) && !$valid_csrf) {
         $alertMsg = ($current_ui_lang == 'cn') ? "❌ CSRF 校验失败" : "❌ CSRF validation failed";
     }
