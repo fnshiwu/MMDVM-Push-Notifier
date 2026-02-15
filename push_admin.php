@@ -44,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         $valid_csrf = isset($_POST['csrf_token']) && hash_equals($_SESSION['csrf_token'] ?? '', $_POST['csrf_token']);
     }
 
+    $msg = null;
+
     if (isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
@@ -69,16 +71,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         $writeRes = file_put_contents($configFile, json_encode($newConfig, 448));
         if ($writeRes !== false) {
             $config = $newConfig;
-            $alertMsg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
+            $msg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         } else {
-            $alertMsg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
+            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update' && $valid_csrf) {
         // Trigger one-click update script in background | 后台执行一键更新脚本
         exec("sudo $updateScript > /dev/null 2>&1 &");
-        $alertMsg = ($current_ui_lang == 'cn') ? "🚀 更新在后台进行中，请稍候刷新查看版本..." : "🚀 Update started in background, please refresh later...";
+        $msg = ($current_ui_lang == 'cn') ? "🚀 更新在后台进行中，请稍候刷新查看版本..." : "🚀 Update started in background, please refresh later...";
     } elseif (isset($_POST['action']) && !$valid_csrf) {
-        $alertMsg = ($current_ui_lang == 'cn') ? "❌ CSRF 校验失败" : "❌ CSRF validation failed";
+        $msg = ($current_ui_lang == 'cn') ? "❌ CSRF 校验失败" : "❌ CSRF validation failed";
     }
     
     set_disk('ro');
@@ -92,10 +94,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
         $foundSuccess = false;
         foreach ($out as $line) { if (stripos($line, 'Success') !== false) { $foundSuccess = true; break; } }
-        $alertMsg = $foundSuccess ? 
+        $msg = $foundSuccess ? 
             ($current_ui_lang == 'cn' ? "✅ 测试反馈: Success" : "✅ Test Feedback: Success") : 
             ($current_ui_lang == 'cn' ? "❌ 测试失败" : "❌ Test Failed");
     }
+
+    if ($msg) {
+        $_SESSION['alert_msg'] = $msg;
+    }
+    // PRG Pattern: Redirect to self to prevent form resubmission | PRG模式：重定向以防止表单重复提交
+    header("Location: " . $_SERVER['PHP_SELF']);
+    exit;
+}
+
+// Retrieve alert message from session | 从会话中获取提示信息
+if (isset($_SESSION['alert_msg'])) {
+    $alertMsg = $_SESSION['alert_msg'];
+    unset($_SESSION['alert_msg']);
 }
 
 // Compatibility helper: render lists from JSON (string/array) | 兼容函数：渲染 JSON 名单（字符串/数组）
