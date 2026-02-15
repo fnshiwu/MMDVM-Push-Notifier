@@ -77,6 +77,14 @@ www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-rw
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-ro
+www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-rw
+www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-ro
+www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,rw /
+www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,ro /
+www-data ALL=(ALL) NOPASSWD: /usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py *
+www-data ALL=(ALL) NOPASSWD: /home/pi-star/MMDVM-Push-Notifier/update.sh
 EOF
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || rm -f "$SUDO_D"
