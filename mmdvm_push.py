@@ -82,7 +82,13 @@ class MMDVMMonitor:
         ip, cpu, mem = self.hw.get_sys_info()
         temp_str, _ = self.hw.get_current_temp(conf)
         title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
-        PushService.send(conf, title, body, is_voice=False, async_mode=False)
+        attempts = 12
+        interval_sec = 10
+        for _ in range(attempts):
+            ok = PushService.send(conf, title, body, is_voice=False, async_mode=False)
+            if ok:
+                return
+            time.sleep(interval_sec)
 
     def _proc_mem_rss_kb(self) -> str:
         try:
