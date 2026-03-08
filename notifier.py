@@ -39,17 +39,17 @@ class PushService:
         hmac_code = hmac.new(string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
         return base64.b64encode(hmac_code).decode("utf-8")
     @classmethod
-    def _do_push_logic(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        """Execute push logic for all enabled platforms | 执行所有启用平台的推送逻辑"""
+    def _do_push_logic(cls, config: Dict, type_label: str, body_text: str, is_voice: bool) -> bool:
+        success = False
         if config.get("push_fs_enabled") and config.get("fs_webhook"):
-            cls._push_feishu(config, type_label, body_text, is_voice)
+            success = cls._push_feishu(config, type_label, body_text, is_voice) or success
         if config.get("push_wx_enabled") and config.get("wx_token"):
-            cls._push_wechat(config, type_label, body_text)
+            success = cls._push_wechat(config, type_label, body_text) or success
         if config.get("push_tg_enabled") and config.get("tg_token") and config.get("tg_chat_id"):
-            cls._push_telegram(config, type_label, body_text)
+            success = cls._push_telegram(config, type_label, body_text) or success
+        return success
     @classmethod
-    def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool):
-        """Push notification to Feishu/Lark | 推送通知到飞书"""
+    def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool) -> bool:
         try:
             ts = str(int(time.time()))
             template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
@@ -63,30 +63,33 @@ class PushService:
             if config.get("fs_secret"):
                 fs_payload["timestamp"] = ts
                 fs_payload["sign"] = cls.get_fs_sign(config["fs_secret"], ts)
-            cls.post_with_retry(config["fs_webhook"], data=json.dumps(fs_payload).encode("utf-8"), is_json=True)
+            resp = cls.post_with_retry(config["fs_webhook"], data=json.dumps(fs_payload).encode("utf-8"), is_json=True)
+            return resp is not None
         except Exception as e:
             logging.getLogger(__name__).error(f"Feishu push failed: {e}")
+            return False
     @classmethod
-    def _push_wechat(cls, config: Dict, type_label: str, body_text: str):
-        """Push notification to WeChat via PushPlus | 通过 PushPlus 推送到微信"""
+    def _push_wechat(cls, config: Dict, type_label: str, body_text: str) -> bool:
         try:
             br = "<br>"
             html_content = f"<b>{type_label}</b>{br}{br}{br.join(body_text.splitlines())}"
             payload = {"token": config["wx_token"], "title": type_label, "content": html_content, "template": "html"}
-            # Use HTTPS for security | 使用 HTTPS 保证安全
-            cls.post_with_retry("https://www.pushplus.plus/send", data=json.dumps(payload).encode("utf-8"), is_json=True)
+            resp = cls.post_with_retry("https://www.pushplus.plus/send", data=json.dumps(payload).encode("utf-8"), is_json=True)
+            return resp is not None
         except Exception as e:
             logging.getLogger(__name__).error(f"WeChat push failed: {e}")
+            return False
     @classmethod
-    def _push_telegram(cls, config: Dict, type_label: str, body_text: str):
-        """Push notification to Telegram | 推送通知到 Telegram"""
+    def _push_telegram(cls, config: Dict, type_label: str, body_text: str) -> bool:
         try:
             text = f"<b>{type_label}</b>\n\n{body_text}"
             url = f"https://api.telegram.org/bot{config['tg_token']}/sendMessage"
             data = urllib.parse.urlencode({"chat_id": config["tg_chat_id"], "text": text, "parse_mode": "HTML"}).encode("utf-8")
-            cls.post_with_retry(url, data=data)
+            resp = cls.post_with_retry(url, data=data)
+            return resp is not None
         except Exception as e:
             logging.getLogger(__name__).error(f"Telegram push failed: {e}")
+            return False
     @classmethod
     def post_with_retry(cls, url: str, data: bytes = None, is_json: bool = False, retries: int = PUSH_RETRY) -> Optional[str]:
         """HTTP POST with exponential backoff retry | 带指数退避重试的 HTTP POST"""
@@ -113,11 +116,9 @@ class PushService:
         return None
     @classmethod
     def send(cls, config: Dict, type_label: str, body_text: str, is_voice: bool = True, async_mode: bool = True):
-        """Send push notification (async by default) | 发送推送通知（默认异步）"""
-        # Check executor under lock to prevent race with shutdown | 在锁内检查执行器防止关闭竞态
         if not cls._ensure_executor():
             logging.getLogger(__name__).warning("Cannot send: executor is shutdown")
-            return
+            return None
 
         if async_mode:
             executor_available = False
@@ -126,12 +127,11 @@ class PushService:
                     cls._executor.submit(cls._do_push_logic, config, type_label, body_text, is_voice)
                     executor_available = True
 
-            # Drop notification if executor was shutdown | 如果执行器已关闭，丢弃通知
             if not executor_available:
                 logging.getLogger(__name__).warning("Executor shutdown during send, dropping notification")
-                return
+                return None
         else:
-            cls._do_push_logic(config, type_label, body_text, is_voice)
+            return cls._do_push_logic(config, type_label, body_text, is_voice)
     @classmethod
     def shutdown(cls):
         """Gracefully shutdown executor and wait for pending tasks | 优雅关闭执行器并等待待处理任务"""
