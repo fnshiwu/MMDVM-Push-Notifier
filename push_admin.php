@@ -8,12 +8,44 @@ $updateScript = '/home/pi-star/MMDVM-Push-Notifier/update.sh';
 $accept = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '';
 $detected_lang = (stripos($accept, 'zh') !== false) ? 'cn' : 'en';
 
+// =========================
+// Pi-Star Version Detection | Pi-Star 版本检测
+// =========================
+$pistar_version = 'unknown';
+$is_bookworm = false;
+if (file_exists('/etc/pistar-release')) {
+    $pistar_release = @file_get_contents('/etc/pistar-release');
+    if ($pistar_release !== false && preg_match('/Version=([0-9.]+)/', $pistar_release, $matches)) {
+        $pistar_version = $matches[1];
+    }
+}
+if (file_exists('/usr/lib/python3.11/EXTERNALLY-MANAGED') || 
+    file_exists('/usr/lib/python3.9/EXTERNALLY-MANAGED') ||
+    (file_exists('/etc/debian_version') && strpos(@file_get_contents('/etc/debian_version'), '12') === 0)) {
+    $is_bookworm = true;
+}
+
 // Version retrieval | 获取实时版本号
-$version = trim(@shell_exec("python3 $scriptPath --version"));
+$version_raw = @shell_exec("python3 $scriptPath --version");
+$version = ($version_raw !== null) ? trim($version_raw) : 'unknown';
 if (empty($version)) { $version = 'unknown'; }
 
 // Disk read/write control | 磁盘读写控制
-function set_disk($mode) { @shell_exec("sudo rpi-$mode; sudo mount -o remount,$mode / 2>/dev/null"); }
+function set_disk($mode) { 
+    // Try all possible rpi-rw/ro paths for 4.3.x compatibility
+    $paths = [
+        "/usr/local/sbin/rpi-$mode",
+        "/usr/local/bin/rpi-$mode",
+        "/usr/bin/rpi-$mode"
+    ];
+    foreach ($paths as $path) {
+        if (file_exists($path)) {
+            @shell_exec("sudo $path");
+            break;
+        }
+    }
+    @shell_exec("sudo mount -o remount,$mode / 2>/dev/null"); 
+}
 
 // Initialize configuration file | 初始化配置文件
 if (!file_exists($configFile)) {
@@ -36,7 +68,7 @@ $_SESSION['csrf_token'] = $csrfToken;
 // Handle POST actions | 处理所有 POST 动作
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
-    
+
     // 捕获当前语言状态
     $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
     $valid_csrf = true;
@@ -73,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             $config = $newConfig;
             $msg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         } else {
-            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击“检查更新”修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
+            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击"检查更新"修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update' && $valid_csrf) {
         // Trigger one-click update script in background | 后台执行一键更新脚本
@@ -82,13 +114,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     } elseif (isset($_POST['action']) && !$valid_csrf) {
         $msg = ($current_ui_lang == 'cn') ? "❌ CSRF 校验失败" : "❌ CSRF validation failed";
     }
-    
+
     set_disk('ro');
-    
+
     // Service control logic | 服务控制逻辑
     $action = $_POST['action'] ?? '';
-    if ($valid_csrf && in_array($action, ['start', 'stop', 'restart'])) shell_exec("sudo /bin/systemctl $action $serviceName");
-    
+    if ($valid_csrf && in_array($action, ['start', 'stop', 'restart'])) {
+        $status_raw = @shell_exec("sudo /bin/systemctl $action $serviceName 2>&1");
+    }
+
     if ($valid_csrf && $action === 'test') {
         $out = []; $res = 0;
         exec("sudo /usr/bin/python3 $scriptPath --test 2>&1", $out, $res);
@@ -121,9 +155,14 @@ function format_list_for_web($data) {
 
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
-$is_running = (strpos(shell_exec("sudo /bin/systemctl status $serviceName --no-pager"), 'active (running)') !== false);
-$healthRaw = @shell_exec("python3 $scriptPath --health");
-$health = json_decode($healthRaw, true);
+
+// Service status check with null-safety | 服务状态检查（空安全）
+$status_raw = @shell_exec("sudo /bin/systemctl status $serviceName --no-pager 2>&1");
+$is_running = ($status_raw !== null) ? (strpos($status_raw, 'active (running)') !== false) : false;
+
+// Health check with null-safety | 健康检查（空安全）
+$healthRaw = @shell_exec("python3 $scriptPath --health 2>&1");
+$health = ($healthRaw !== null) ? json_decode($healthRaw, true) : null;
 if (!is_array($health)) {
     $health = [
         "version" => $version,
@@ -143,7 +182,7 @@ $lang = [
     'cn' => [
         'nav_dash'=>'仪表盘','nav_admin'=>'管理','nav_log'=>'日志','nav_power'=>'电源','nav_push'=>'推送设置','srv_ctrl'=>'服务控制','status'=>'状态','run'=>'运行中','stop'=>'已停止','btn_start'=>'启动','btn_stop'=>'停止','btn_res'=>'重启','btn_test'=>'发送测试','btn_save'=>'保存设置','btn_update'=>'检查更新','conf'=>'推送功能设置','my_call'=>'我的呼号','min_dur'=>'最小推送时长 (秒)','qm_en'=>'开启静音时段','qm_range'=>'静音时间范围',
         'boot_set'=>'启动通知','temp_set'=>'高温预警','en_boot'=>'设备启动提醒','en_temp'=>'高温预警','th_temp'=>'预警阈值','int_temp'=>'预警间隔 (分)',
-        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'仅呼号，使用“；”分隔'
+        'tg_set'=>'Telegram 设置','wx_set'=>'微信 (PushPlus) 设置','fs_set'=>'飞书 (Feishu) 设置','en'=>'启用推送','ign_list'=>'忽略列表 (黑名单)','foc_list'=>'关注列表 (白名单)','list_hint'=>'仅呼号，使用"；"分隔'
     ],
     'en' => [
         'nav_dash'=>'Dashboard','nav_admin'=>'Admin','nav_log'=>'Live Logs','nav_power'=>'Power','nav_push'=>'Push Settings','srv_ctrl'=>'Service Control','status'=>'Status','run'=>'RUNNING','stop'=>'STOPPED','btn_start'=>'Start','btn_stop'=>'Stop','btn_res'=>'Restart','btn_test'=>'Send Test','btn_save'=>'SAVE SETTINGS','btn_update'=>'Update Now','conf'=>'Push Notifier Settings','my_call'=>'My Callsign','min_dur'=>'Min Duration (sec)','qm_en'=>'Quiet Mode','qm_range'=>'Quiet Time Range (HH:mm, 24-hour format)',
@@ -170,6 +209,7 @@ $lang = [
         .btn-update { background: #444; color: #fff; border: 1px solid #000; cursor: pointer; padding: 2px 10px; margin-left: 15px; }
         table.settings td:first-child { font-weight: bold; text-align: left !important; padding-left: 10px; width: 35%; }
         table.settings td:last-child { text-align: left !important; padding-left: 10px; }
+        .version-info { font-size: 11px; color: #aaa; text-align: right; padding-right: 10px; }
     </style>
 </head>
 <body>
@@ -184,6 +224,10 @@ $lang = [
             <a href="/admin/push_admin.php" style="color: #fff; font-weight: bold;"><?php echo $lang['nav_push']; ?></a> | 
             <a href="?set_lang=<?php echo $is_cn?'en':'cn';?>" style="color: #ffff00;">[<?php echo $is_cn?'English':'中文';?>]</a>
         </p>
+        <div class="version-info">
+            Pi-Star: <?php echo htmlspecialchars($pistar_version, ENT_QUOTES, 'UTF-8'); ?> 
+            <?php if ($is_bookworm) echo '| Bookworm'; ?>
+        </div>
     </div>
     <div class="contentwide">
         <?php if(isset($alertMsg)) echo "<div style='background:#ffffc0; color:#000; padding:5px; text-align:center; border:1px solid #666;'><b>".htmlspecialchars($alertMsg, ENT_QUOTES, 'UTF-8')."</b></div>"; ?>
@@ -202,6 +246,8 @@ $lang = [
             </td></tr>
             <thead><tr><th colspan="2"><?php echo $is_cn?'健康状态':'Health Status'; ?></th></tr></thead>
             <tr><td><?php echo $is_cn?'版本':'Version'; ?>:</td><td><?php echo htmlspecialchars($health['version']??$version, ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'Pi-Star 版本':'Pi-Star Version'; ?>:</td><td><?php echo htmlspecialchars($pistar_version, ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <tr><td><?php echo $is_cn?'系统':'OS'; ?>:</td><td><?php echo $is_bookworm ? 'Debian 12 (Bookworm)' : 'Debian 11 (Bullseye) or earlier'; ?></td></tr>
             <tr><td><?php echo $is_cn?'MMDVM 日志目录':'MMDVM Log Dir'; ?>:</td><td><?php echo htmlspecialchars($health['mmdvm_log_dir']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>
             <tr><td><?php echo $is_cn?'日志目录存在':'Log Dir Exists'; ?>:</td><td><b style="color:<?php echo ($health['mmdvm_log_exists']??false)?'#008000':'#ff0000';?>"><?php echo ($health['mmdvm_log_exists']??false)?$yes:$no; ?></b></td></tr>
             <tr><td><?php echo $is_cn?'应用日志目录':'App Log Dir'; ?>:</td><td><?php echo htmlspecialchars($health['app_log_dir']??'', ENT_QUOTES, 'UTF-8'); ?></td></tr>

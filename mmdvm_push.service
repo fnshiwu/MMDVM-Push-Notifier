@@ -1,29 +1,23 @@
 [Unit]
-Description=MMDVM Log Push Notifier S+
+Description=MMDVM Push Notifier
 After=network-online.target mmdvmhost.service
-Wants=network-online.target mmdvmhost.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=mmdvm-push
 Group=mmdvm-push
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
-
-# Cold-start delay | 冷启动缓冲
-ExecStartPre=/bin/sleep 20
-
-# Core Python service with -u for unbuffered logs | 核心 Python 服务（-u 保证日志即时）
-ExecStart=/usr/bin/python3 -u /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
-
-# Auto-restart to recover from transient errors | 自动重启防止偶发错误
-Restart=always
+ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
+Restart=on-failure
 RestartSec=10
-StartLimitInterval=0
-
-# Resource limits to protect system | 资源限制以保护系统
-NoNewPrivileges=true
-CPUQuota=30%
-MemoryMax=150M
+# Debian 12 Bookworm / systemd 254+ recommended settings
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mmdvm_push
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
 
 [Install]
 WantedBy=multi-user.target

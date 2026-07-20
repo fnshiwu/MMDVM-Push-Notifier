@@ -1,5 +1,6 @@
 #!/bin/bash
-# MMDVM-Push-Notifier uninstaller | 卸载脚本
+# MMDVM-Push-Notifier uninstaller (v2.1.0-pistar4.3.7) | 卸载脚本
+# Pi-Star 4.3.7 Compatible
 
 echo "--- MMDVM-Push-Notifier Uninstaller ---"
 echo "WARNING: This will remove the service, configuration, and web interface."
@@ -13,7 +14,14 @@ fi
 # 1) Get write permission | 获取写入权限
 echo "1. Requesting disk write permission..."
 sudo mount -o remount,rw / 2>/dev/null
-sudo /usr/local/bin/rpi-rw 2>/dev/null || sudo /usr/bin/rpi-rw 2>/dev/null
+
+# Try all possible rpi-rw paths | 尝试所有可能的 rpi-rw 路径
+for cmd_path in /usr/local/sbin/rpi-rw /usr/local/bin/rpi-rw /usr/bin/rpi-rw; do
+    if [ -x "$cmd_path" ]; then
+        sudo "$cmd_path"
+        break
+    fi
+done
 
 # 2) Stop and disable service | 停止并禁用服务
 echo "2. Stopping service..."

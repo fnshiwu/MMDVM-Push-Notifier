@@ -26,13 +26,40 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.4.5"
+VERSION = "v3.5.0"
 CONFIG_FILE = "/etc/mmdvm_push.json"
 MMDVM_LOG_DIR = "/var/log/pi-star/"
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 MEMORY_CHECK_INTERVAL = 3600  # Memory check interval in seconds
-MEMORY_THRESHOLD_KB = 100000  # Memory threshold in KB (100MB)
 MAX_LOG_ITERATIONS = 100000  # Max log loop iterations to prevent stale handles
+
+# =========================
+# Pi-Star Version Detection | Pi-Star 版本检测
+# =========================
+PISTAR_VERSION = "unknown"
+IS_BOOKWORM = False
+
+try:
+    with open("/etc/pistar-release", "r") as f:
+        for line in f:
+            if line.startswith("Version="):
+                PISTAR_VERSION = line.strip().split("=", 1)[1].strip()
+                break
+except (FileNotFoundError, OSError):
+    pass
+
+try:
+    with open("/etc/debian_version", "r") as f:
+        debian_ver = f.read().strip()
+        if debian_ver.startswith("12"):
+            IS_BOOKWORM = True
+except (FileNotFoundError, OSError):
+    pass
+
+# Check for externally managed Python (Bookworm marker)
+if os.path.exists("/usr/lib/python3.11/EXTERNALLY-MANAGED") or \
+   glob.glob("/usr/lib/python3.*/EXTERNALLY-MANAGED"):
+    IS_BOOKWORM = True
 
 # Version check for web interface
 if len(sys.argv) > 1 and sys.argv[1] == "--version":
@@ -56,13 +83,17 @@ def setup_logging():
         )
     except PermissionError:
         logging.basicConfig(level=logging.INFO, format='%(message)s')
-    
+
     console = logging.StreamHandler()
     console.setLevel(logging.INFO)
     formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
     console.setFormatter(formatter)
     logging.getLogger('').addHandler(console)
     logger = logging.getLogger(__name__)
+
+    # Log system info on startup
+    logger.info(f"MMDVM-Push-Notifier {VERSION} starting")
+    logger.info(f"Pi-Star Version: {PISTAR_VERSION}, Bookworm: {IS_BOOKWORM}")
 
 atexit.register(PushService.shutdown)
 
@@ -114,7 +145,7 @@ class MMDVMMonitor:
             yesterday_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{yesterday}.log")
             if os.path.exists(yesterday_log) and os.path.getsize(yesterday_log) > 0:
                 return yesterday_log
-                
+
             # Fallback to glob
             log_files = glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
             valid_files = [f for f in log_files if os.path.isfile(f) and os.path.getsize(f) > 0]
@@ -133,7 +164,7 @@ class MMDVMMonitor:
                 return True
             except Exception:
                 time.sleep(interval)
-        
+
         logger.warning("Network check timed out")
         return False
 
@@ -145,9 +176,9 @@ class MMDVMMonitor:
             self._send_boot_notice(conf, network_ok)
 
         logger.info(f"{VERSION} Monitor ready, tailing logs...")
-        
+
         last_mem_check = time.time()
-        
+
         # Initialize temp check timer
         self._last_temp_check = time.time()
 
@@ -187,7 +218,7 @@ class MMDVMMonitor:
 
                 while True:
                     iteration_count += 1
-                    
+
                     # Periodic Reset
                     if time.time() - start_time > 3600:
                         iteration_count = 0
@@ -202,7 +233,7 @@ class MMDVMMonitor:
                     # 逻辑集中于此。配置中的 temp_interval 已转换为秒。
                     conf = ConfigManager.get_config()
                     temp_interval = conf.get('temp_interval', 1800) # Default 30 mins
-                    
+
                     now_ts = time.time()
                     if now_ts - self._last_temp_check > temp_interval:
                         # Call AlertManager to check threshold and format message
@@ -243,15 +274,15 @@ class MMDVMMonitor:
         event = parse_line(line)
         if not event:
             return
-            
+
         conf = ConfigManager.get_config()
-        
+
         if quiet_time(conf):
             return
-            
+
         if not should_push(conf, event, self.last_msg):
             return
-            
+
         # Update last message state for deduplication
         curr_ts = time.time()
         self.last_msg.update({
@@ -260,12 +291,12 @@ class MMDVMMonitor:
             "ts": curr_ts
         })
         self.last_activity_ts = curr_ts
-        
+
         # Identity lookup and formatting
         info = self.identity.get_info(event['call'])
         temp_str, _ = self.hw.get_current_temp(conf)
         type_label, body = format_message(conf, event, temp_str, info)
-        
+
         PushService.send(conf, type_label, body, is_voice=event['is_voice'])
         logger.info(f"Push sent: {event['call']} -> {event['target']}")
 
@@ -290,10 +321,18 @@ if __name__ == "__main__":
             ip, cpu_sys, mem_sys = mon.hw.get_sys_info()
             cpu_proc = mon.hw._cpu_percent_process(interval=0.1) # Non-blocking approx
             rss_kb = mon._proc_mem_rss_kb()
+
+            # Detect log directory writability
+            app_log_writable = os.path.exists(APP_LOG_DIR) and os.access(APP_LOG_DIR, os.W_OK)
+            if not app_log_writable:
+                app_log_writable = os.access(tempfile.gettempdir(), os.W_OK)
+
             status = {
                 "version": VERSION,
-                "app_log_dir": APP_LOG_DIR,
-                "app_log_writable": os.access(APP_LOG_DIR, os.W_OK),
+                "pistar_version": PISTAR_VERSION,
+                "is_bookworm": IS_BOOKWORM,
+                "app_log_dir": APP_LOG_DIR if os.path.exists(APP_LOG_DIR) else tempfile.gettempdir(),
+                "app_log_writable": app_log_writable,
                 "mmdvm_log_dir": MMDVM_LOG_DIR,
                 "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
                 "config_exists": os.path.exists(CONFIG_FILE),
@@ -307,7 +346,7 @@ if __name__ == "__main__":
             }
             print(json.dumps(status, ensure_ascii=False))
         except Exception as e:
-            print(json.dumps({"error": str(e), "config_valid": False}, ensure_ascii=False))
+            print(json.dumps({"error": str(e), "config_valid": False, "version": VERSION}, ensure_ascii=False))
     else:
         setup_logging()
         monitor = MMDVMMonitor()
