@@ -182,7 +182,3 @@ sudo bash uninstall.sh
 
 * Callsign: **BA4SMQ**
 * QTH: Jiangsu Funing, China
-
-```
-
-```
