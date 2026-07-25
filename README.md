@@ -90,58 +90,99 @@ MMDVM-Push-Notifier/
 ├── mmdvm_push.service   # systemd 服务（资源限制、自动重启）
 └── tests/               # 轻量单元测试（parser/filters/notify）
 
-🚀 安装方法 | Installation
-Bash
+```
+
+---
+
+## 🚀 安装方法 | Installation
+
+```bash
 rpi-rw
 cd /home/pi-star
 git clone [https://github.com/fnshiwu/MMDVM-Push-Notifier.git](https://github.com/fnshiwu/MMDVM-Push-Notifier.git)
 cd MMDVM-Push-Notifier
 sudo bash install.sh
 
-🧪 测试与诊断 | Testing & Diagnostics
-1. 测试推送 | Test Notification
-Bash
+```
+
+---
+
+## 🧪 测试与诊断 | Testing & Diagnostics
+
+### 1. 测试推送 | Test Notification
+
+```bash
 sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
-2. 健康检查 | Health Check
-Bash
+
+```
+
+### 2. 健康检查 | Health Check
+
+```bash
 sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
-3. 一键诊断 | Quick Diagnostics
-Bash
+
+```
+
+### 3. 一键诊断 | Quick Diagnostics
+
+```bash
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash diagnose.sh
-自动检查项：服务状态、进程、日志、配置、网络、推送功能。
 
-🌐 Web 管理界面 | Web Interface
-访问地址 / Access: http://pi-star.local/admin/push_admin.php
+```
 
-配置文件 / Configuration: /etc/mmdvm_push.json
+> 自动检查项：服务状态、进程、日志、配置、网络、推送功能。
 
-提示：配置修改后自动生效，无需重启服务。
+---
 
-🔄 在线更新 | Updating
-⚠️ 请勿重复运行 install.sh 进行升级！
+## 🌐 Web 管理界面 | Web Interface
 
-⚠️ Do NOT reinstall for upgrades, use update.sh instead.
+* **访问地址 / Access:** `http://pi-star.local/admin/push_admin.php`
+* **配置文件 / Configuration:** `/etc/mmdvm_push.json`
+* *提示：配置修改后自动生效，无需重启服务。*
 
-Bash
+---
+
+## 🔄 在线更新 | Updating
+
+⚠️ **请勿重复运行 `install.sh` 进行升级！**
+
+⚠️ **Do NOT reinstall for upgrades, use update.sh instead.**
+
+```bash
 rpi-rw
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash update.sh
-🛑 卸载 | Uninstall
-Bash
+
+```
+
+---
+
+## 🛑 卸载 | Uninstall
+
+```bash
 rpi-rw
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash uninstall.sh
-🧠 设计说明 | Design Notes  
-mmap + regex based log parsing  
 
-ThreadPool + semaphore controlled concurrency  
+```
 
-Hot-reload configuration design  
+---
 
-Deep integration with Pi-Star filesystem and permission model  
+## 🧠 设计说明 | Design Notes
 
-📡 作者 | Author  
-Callsign: BA4SMQ
+* mmap + regex based log parsing
+* ThreadPool + semaphore controlled concurrency
+* Hot-reload configuration design
+* Deep integration with Pi-Star filesystem and permission model
 
-QTH: Jiangsu Funing, China
+---
+
+## 📡 作者 | Author
+
+* Callsign: **BA4SMQ**
+* QTH: Jiangsu Funing, China
+
+```
+
+```
