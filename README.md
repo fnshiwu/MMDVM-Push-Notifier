@@ -1,5 +1,3 @@
-```markdown
-
 # MMDVM-Push-Notifier
 
 一个专为 **Pi-Star / MMDVM** 设计的高性能通联与系统状态推送工具  
@@ -11,9 +9,9 @@
 
 ---
 
-> **Project Status | 项目状态**  
-> Designed for long-term, unattended operation on Pi-Star systems. Actively maintained and validated in real-world hotspot deployments.  
-> 本项目面向 Pi-Star 的长期稳定运行场景设计，已在真实热点环境中验证并持续维护，优先保证稳定性、性能与兼容性。
+**Project Status | 项目状态**  
+Designed for long-term, unattended operation on Pi-Star systems. Actively maintained and validated in real-world hotspot deployments.  
+本项目面向 Pi-Star 的长期稳定运行场景设计，已在真实热点环境中验证并持续维护，优先保证稳定性、性能与兼容性。
 
 ---
 
@@ -21,7 +19,7 @@
 
 **MMDVM-Push-Notifier** 是一个专为 **Pi-Star 数字语音热点** 设计的实时推送通知工具。它通过解析 `MMDVMHost` 运行日志，自动识别 **语音 / 数据通联事件**，并将结构化信息推送至多个平台。
 
-**MMDVM-Push-Notifier** is a real-time notification system designed specifically for **Pi-Star based MMDVM hotspots**. It monitors `MMDVMHost` logs and sends structured notifications for **voice and data transmissions**.
+> **MMDVM-Push-Notifier** is a real-time notification system designed specifically for **Pi-Star based MMDVM hotspots**. It monitors `MMDVMHost` logs and sends structured notifications for **voice and data transmissions**.
 
 **支持平台 / Supported Platforms:**
 * 📢 Telegram
@@ -92,95 +90,58 @@ MMDVM-Push-Notifier/
 ├── mmdvm_push.service   # systemd 服务（资源限制、自动重启）
 └── tests/               # 轻量单元测试（parser/filters/notify）
 
-```
-
----
-
-## 🚀 安装方法 | Installation
-
-```bash
+🚀 安装方法 | Installation
+Bash
 rpi-rw
 cd /home/pi-star
 git clone [https://github.com/fnshiwu/MMDVM-Push-Notifier.git](https://github.com/fnshiwu/MMDVM-Push-Notifier.git)
 cd MMDVM-Push-Notifier
 sudo bash install.sh
 
-```
-
----
-
-## 🧪 测试与诊断 | Testing & Diagnostics
-
-### 1. 测试推送 | Test Notification
-
-```bash
+🧪 测试与诊断 | Testing & Diagnostics
+1. 测试推送 | Test Notification
+Bash
 sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
-
-```
-
-### 2. 健康检查 | Health Check
-
-```bash
+2. 健康检查 | Health Check
+Bash
 sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
-
-```
-
-### 3. 一键诊断 | Quick Diagnostics
-
-```bash
+3. 一键诊断 | Quick Diagnostics
+Bash
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash diagnose.sh
+自动检查项：服务状态、进程、日志、配置、网络、推送功能。
 
-```
+🌐 Web 管理界面 | Web Interface
+访问地址 / Access: http://pi-star.local/admin/push_admin.php
 
-> 自动检查项：服务状态、进程、日志、配置、网络、推送功能。
+配置文件 / Configuration: /etc/mmdvm_push.json
 
----
+提示：配置修改后自动生效，无需重启服务。
 
-## 🌐 Web 管理界面 | Web Interface
+🔄 在线更新 | Updating
+⚠️ 请勿重复运行 install.sh 进行升级！
 
-* **访问地址 / Access:** `http://pi-star.local/admin/push_admin.php`
-* **配置文件 / Configuration:** `/etc/mmdvm_push.json`
-* *提示：配置修改后自动生效，无需重启服务。*
+⚠️ Do NOT reinstall for upgrades, use update.sh instead.
 
----
-
-## 🔄 在线更新 | Updating
-
-⚠️ **请勿重复运行 `install.sh` 进行升级！**
-
-⚠️ **Do NOT reinstall for upgrades, use update.sh instead.**
-
-```bash
+Bash
 rpi-rw
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash update.sh
-
-```
-
----
-
-## 🛑 卸载 | Uninstall
-
-```bash
+🛑 卸载 | Uninstall
+Bash
 rpi-rw
 cd /home/pi-star/MMDVM-Push-Notifier
 sudo bash uninstall.sh
+🧠 设计说明 | Design Notes  
+mmap + regex based log parsing  
 
-```
+ThreadPool + semaphore controlled concurrency  
 
----
+Hot-reload configuration design  
 
-## 🧠 设计说明 | Design Notes
+Deep integration with Pi-Star filesystem and permission model  
 
-* mmap + regex based log parsing
-* ThreadPool + semaphore controlled concurrency
-* Hot-reload configuration design
-* Deep integration with Pi-Star filesystem and permission model
+📡 作者 | Author  
+Callsign: BA4SMQ
 
----
-
-## 📡 作者 | Author
-
-* Callsign: **BA4SMQ**
-* QTH: Jiangsu Funing, China
+QTH: Jiangsu Funing, China
