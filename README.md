@@ -99,7 +99,7 @@ MMDVM-Push-Notifier/
 ```bash
 rpi-rw
 cd /home/pi-star
-git clone [https://github.com/fnshiwu/MMDVM-Push-Notifier.git](https://github.com/fnshiwu/MMDVM-Push-Notifier.git)
+git clone https://github.com/fnshiwu/MMDVM-Push-Notifier.git
 cd MMDVM-Push-Notifier
 sudo bash install.sh
 
