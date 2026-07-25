@@ -1,0 +1,23 @@
+[Unit]
+Description=MMDVM Push Notifier
+After=network-online.target mmdvmhost.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mmdvm-push
+Group=mmdvm-push
+WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
+ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
+Restart=on-failure
+RestartSec=10
+# Debian 12 Bookworm / systemd 254+ recommended settings
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mmdvm_push
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
