@@ -10,7 +10,7 @@
 [![Python Version](https://img.shields.io/badge/python-3.x-blue.svg?style=flat-square)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=flat-square)](LICENSE)
 
-</div>
+---
 
 > **Project Status | 项目状态**  
 > Designed for long-term, unattended operation on Pi-Star systems. Actively maintained and validated in real-world hotspot deployments.  
@@ -22,7 +22,7 @@
 
 **MMDVM-Push-Notifier** 是一个专为 **Pi-Star 数字语音热点** 设计的实时推送通知工具。它通过解析 `MMDVMHost` 运行日志，自动识别 **语音 / 数据通联事件**，并将结构化信息推送至多个平台。
 
-> **MMDVM-Push-Notifier** is a real-time notification system designed specifically for **Pi-Star based MMDVM hotspots**. It monitors `MMDVMHost` logs and sends structured notifications for **voice and data transmissions**.
+**MMDVM-Push-Notifier** is a real-time notification system designed specifically for **Pi-Star based MMDVM hotspots**. It monitors `MMDVMHost` logs and sends structured notifications for **voice and data transmissions**.
 
 **支持平台 / Supported Platforms:**
 * 📢 Telegram
