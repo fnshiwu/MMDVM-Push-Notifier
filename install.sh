@@ -1,6 +1,6 @@
 #!/bin/bash
-# MMDVM-Push-Notifier enhanced installer (v3.2.0-pistar4.3.7) | 强化版安装脚本
-# Pi-Star 4.3.7 (Debian 12 Bookworm) Compatible | 兼容 Pi-Star 4.3.7
+# MMDVM-Push-Notifier enhanced installer (v3.5.0-pistar4.3) | 强化版安装脚本
+# Pi-Star 4.3.x (Debian 12 Bookworm) Compatible | 兼容 Pi-Star 4.3.x
 
 if [ "$EUID" -ne 0 ]; then 
   echo "请使用 sudo 运行此脚本: sudo ./install.sh"
@@ -88,14 +88,22 @@ if [ ! -f "$CONFIG_FILE" ]; then
     echo '{"my_callsign":"BA4SMQ","min_duration":5.0,"ui_lang":"cn"}' > $CONFIG_FILE
 fi
 chown mmdvm-push:www-data $CONFIG_FILE
-chmod 660 $CONFIG_FILE
-echo "Config file permission set to 660 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 660（owner: mmdvm-push, group: www-data）"
+chmod 664 $CONFIG_FILE
+echo "Config file permission set to 664 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 664（owner: mmdvm-push, group: www-data）"
 
 echo "3. Deploy Web admin (symlink) | 部署 Web 管理页面（软链接）..."
-if [ -d "/var/www/dashboard/admin" ]; then
-    ln -sf $INSTALL_DIR/push_admin.php "/var/www/dashboard/admin/push_admin.php"
-fi
-chown www-data:www-data $INSTALL_DIR/push_admin.php
+# 确定并创建正确的网页后台目录结构
+WEB_ADMIN_DIR="/var/www/dashboard/admin"
+mkdir -p "$WEB_ADMIN_DIR" 2>/dev/null
+
+# 软链接至主目录和子目录，保持双向兼容
+ln -sf "$INSTALL_DIR/push_admin.php" "$WEB_ADMIN_DIR/push_admin.php"
+ln -sf "$INSTALL_DIR/push_admin.php" "/var/www/dashboard/push_admin.php" 2>/dev/null
+ln -sf "$INSTALL_DIR/push_admin.php" "/var/www/html/push_admin.php" 2>/dev/null
+
+chown www-data:www-data "$INSTALL_DIR/push_admin.php"
+chmod 644 "$INSTALL_DIR/push_admin.php"
+
 ADMIN_INDEX="/var/www/dashboard/admin/index.php"
 if [ -f "$ADMIN_INDEX" ]; then
     cp "$ADMIN_INDEX" "$ADMIN_INDEX.bak_pushnav" 2>/dev/null
@@ -111,15 +119,13 @@ UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
 chmod +x $UPDATE_SCRIPT
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
 
-# =========================
-# Pi-Star 4.3.5+ Sudoers Compatibility | 4.3.5+ sudoers 兼容性
-# =========================
-# Pi-Star 4.3.5+ uses path-scoped sudoers (/etc/sudoers.d/pistar-dashboard)
-# We add our own scoped rules that are compatible with both old and new models
-
+# 生成严格无误且包含 /usr/bin/ 与 /bin/ 兼容路径的 Sudoers 规则
 cat > "$SUDO_D" <<'EOF'
-# MMDVM-Push-Notifier sudoers - Compatible with Pi-Star 4.3.5+ path-scoped model
-# Debian 12 Bookworm / Pi-Star 4.3.x compatible
+# MMDVM-Push-Notifier sudoers - Compatible with Pi-Star 4.3.5+
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart mmdvm_push.service
+www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl status mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
@@ -135,6 +141,7 @@ www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,ro /
 www-data ALL=(ALL) NOPASSWD: /usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py *
 www-data ALL=(ALL) NOPASSWD: /home/pi-star/MMDVM-Push-Notifier/update.sh
 EOF
+
 chmod 440 "$SUDO_D"
 visudo -cf "$SUDO_D" >/dev/null 2>&1 || { 
     echo "⚠️  Sudoers validation failed, removing custom file"
@@ -157,7 +164,7 @@ systemctl daemon-reload
 systemctl enable mmdvm_push.service
 systemctl restart mmdvm_push.service
 
-# --- 7. Post-Install Summary / 安装后检查 ---
+# --- Post-Install Summary / 安装后检查 ---
 ACTUAL_VER=$(python3 $INSTALL_DIR/mmdvm_push.py --version 2>/dev/null)
 if [ -z "$ACTUAL_VER" ]; then ACTUAL_VER="unknown"; fi
 echo "--------------------------------------------------------"
