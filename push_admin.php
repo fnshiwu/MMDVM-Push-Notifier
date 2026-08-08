@@ -32,7 +32,6 @@ if (empty($version)) { $version = 'unknown'; }
 
 // Disk read/write control | 磁盘读写控制
 function set_disk($mode) { 
-    // Try all possible rpi-rw/ro paths for 4.3.x compatibility
     $paths = [
         "/usr/local/sbin/rpi-$mode",
         "/usr/local/bin/rpi-$mode",
@@ -45,6 +44,11 @@ function set_disk($mode) {
         }
     }
     @shell_exec("sudo mount -o remount,$mode / 2>/dev/null"); 
+}
+
+// Helper to clean quotes from token input | Token 清洗辅助函数
+function clean_input_token($val) {
+    return trim((string)$val, " \t\n\r\0\x0B\"'");
 }
 
 // Initialize configuration file | 初始化配置文件
@@ -69,7 +73,6 @@ $_SESSION['csrf_token'] = $csrfToken;
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     set_disk('rw');
 
-    // 捕获当前语言状态
     $current_ui_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
     $valid_csrf = true;
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_GET['set_lang'])) {
@@ -82,8 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
         $config['ui_lang'] = $_GET['set_lang'];
         $_SESSION['pistar_push_lang'] = $_GET['set_lang'];
         file_put_contents($configFile, json_encode($config, 192));
-    } elseif ($_POST['action'] === 'save' && $valid_csrf) {
-        // Core fix: store lists as plain string; support semicolon/newline | 核心修复：名单存为字符串，支持分号/换行
+    } elseif (isset($_POST['action']) && $_POST['action'] === 'save' && $valid_csrf) {
         $newConfig = [
             "my_callsign" => strtoupper(trim($_POST['callsign'])),
             "min_duration" => floatval($_POST['min_duration']),
@@ -93,9 +95,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             "temp_threshold" => floatval($_POST['temp_th']),
             "temp_interval" => intval($_POST['temp_int']),
             "temp_unit" => $_POST['temp_unit'] ?? 'C',
-            "push_tg_enabled" => isset($_POST['tg_en']), "tg_token" => trim($_POST['tg_token']), "tg_chat_id" => trim($_POST['tg_chat_id']),
-            "push_wx_enabled" => isset($_POST['wx_en']), "wx_token" => trim($_POST['wx_token']),
-            "push_fs_enabled" => isset($_POST['fs_en']), "fs_webhook" => trim($_POST['fs_webhook']), "fs_secret" => trim($_POST['fs_secret']),
+            "push_tg_enabled" => isset($_POST['tg_en']), 
+            "tg_token" => clean_input_token($_POST['tg_token'] ?? ''), 
+            "tg_chat_id" => clean_input_token($_POST['tg_chat_id'] ?? ''),
+            "push_wx_enabled" => isset($_POST['wx_en']), 
+            "wx_token" => clean_input_token($_POST['wx_token'] ?? ''),
+            "push_fs_enabled" => isset($_POST['fs_en']), 
+            "fs_webhook" => clean_input_token($_POST['fs_webhook'] ?? ''), 
+            "fs_secret" => clean_input_token($_POST['fs_secret'] ?? ''),
             "ignore_list" => trim($_POST['ignore_list']), 
             "focus_list" => trim($_POST['focus_list']),
             "ui_lang" => $current_ui_lang
@@ -105,10 +112,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             $config = $newConfig;
             $msg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         } else {
-            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击\"检查更新\"修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
+            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足" : "❌ Save failed: read-only filesystem or permission denied.";
         }
-    } elseif ($_POST['action'] === 'update' && $valid_csrf) {
-        // Trigger one-click update script in background | 后台执行一键更新脚本
+    } elseif (isset($_POST['action']) && $_POST['action'] === 'update' && $valid_csrf) {
         exec("sudo $updateScript > /dev/null 2>&1 &");
         $msg = ($current_ui_lang == 'cn') ? "🚀 更新在后台进行中，请稍候刷新查看版本..." : "🚀 Update started in background, please refresh later...";
     } elseif (isset($_POST['action']) && !$valid_csrf) {
@@ -120,7 +126,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     // Service control logic | 服务控制逻辑
     $action = $_POST['action'] ?? '';
     if ($valid_csrf && in_array($action, ['start', 'stop', 'restart'])) {
-        $status_raw = @shell_exec("sudo /bin/systemctl $action $serviceName 2>&1");
+        @shell_exec("sudo systemctl $action $serviceName 2>&1");
+        // 控制服务后短暂暂停 0.5 秒给 systemd 反应时间
+        usleep(500000); 
     }
 
     if ($valid_csrf && $action === 'test') {
@@ -136,18 +144,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
     if ($msg) {
         $_SESSION['alert_msg'] = $msg;
     }
-    // PRG Pattern: Redirect to self to prevent form resubmission | PRG模式：重定向以防止表单重复提交
     header("Location: " . $_SERVER['PHP_SELF']);
     exit;
 }
 
-// Retrieve alert message from session | 从会话中获取提示信息
 if (isset($_SESSION['alert_msg'])) {
     $alertMsg = $_SESSION['alert_msg'];
     unset($_SESSION['alert_msg']);
 }
 
-// Compatibility helper: render lists from JSON (string/array) | 兼容函数：渲染 JSON 名单（字符串/数组）
 function format_list_for_web($data) {
     if (is_array($data)) return implode("; ", $data);
     return (string)$data;
@@ -156,11 +161,11 @@ function format_list_for_web($data) {
 $current_lang = $_SESSION['pistar_push_lang'] ?? ($config['ui_lang'] ?? 'cn');
 $is_cn = ($current_lang === 'cn');
 
-// Service status check with null-safety | 服务状态检查（空安全）
-$status_raw = @shell_exec("sudo /bin/systemctl status $serviceName --no-pager 2>&1");
+// Service status check | 服务状态检查
+$status_raw = @shell_exec("sudo systemctl status $serviceName --no-pager 2>&1");
 $is_running = ($status_raw !== null) ? (strpos($status_raw, 'active (running)') !== false) : false;
 
-// Health check with null-safety | 健康检查（空安全）
+// Health check | 健康检查
 $healthRaw = @shell_exec("python3 $scriptPath --health 2>&1");
 $health = ($healthRaw !== null) ? json_decode($healthRaw, true) : null;
 if (!is_array($health)) {
