@@ -105,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || isset($_GET['set_lang'])) {
             $config = $newConfig;
             $msg = ($current_ui_lang == 'cn') ? "✅ 设置已保存！" : "✅ Settings Saved!";
         } else {
-            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击"检查更新"修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
+            $msg = ($current_ui_lang == 'cn') ? "❌ 保存失败：磁盘只读或权限不足，请点击\"检查更新\"修复，或运行 sudo bash update.sh" : "❌ Save failed: read-only filesystem or permission denied. Click 'Update' or run sudo bash update.sh";
         }
     } elseif ($_POST['action'] === 'update' && $valid_csrf) {
         // Trigger one-click update script in background | 后台执行一键更新脚本
