@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier enhanced installer (v3.5.1-pistar4.3) | 强化版安装脚本
+# MMDVM-Push-Notifier enhanced installer (v3.5.2-pistar4.3) | 强化版安装脚本
 # Pi-Star 4.3.x (Debian 12 Bookworm) Compatible | 兼容 Pi-Star 4.3.x
 
 if [ "$EUID" -ne 0 ]; then 
@@ -111,32 +111,16 @@ fi
 
 echo "4. Grant web 'update' sudoers permissions | 授权网页端【一键更新】免密权限..."
 UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
-chmod +x $UPDATE_SCRIPT
+chmod +x "$UPDATE_SCRIPT"
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
 
-cat > "$SUDO_D" <<'EOF'
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl status mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl stop mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl restart mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl status mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/local/sbin/rpi-rw
-www-data ALL=(ALL) NOPASSWD: /usr/local/sbin/rpi-ro
-www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-rw
-www-data ALL=(ALL) NOPASSWD: /usr/local/bin/rpi-ro
-www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-rw
-www-data ALL=(ALL) NOPASSWD: /usr/bin/rpi-ro
-www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,rw /
-www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,ro /
-www-data ALL=(ALL) NOPASSWD: /usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py *
-www-data ALL=(ALL) NOPASSWD: /home/pi-star/MMDVM-Push-Notifier/update.sh
-EOF
+# 写入纯净的 Sudoers 规则（单行多指令聚合，结尾带标准 POSIX 换行符）
+printf "www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service, /usr/bin/systemctl stop mmdvm_push.service, /usr/bin/systemctl restart mmdvm_push.service, /usr/bin/systemctl status mmdvm_push.service, /bin/systemctl start mmdvm_push.service, /bin/systemctl stop mmdvm_push.service, /bin/systemctl restart mmdvm_push.service, /bin/systemctl status mmdvm_push.service, /usr/local/sbin/rpi-rw, /usr/local/sbin/rpi-ro, /usr/local/bin/rpi-rw, /usr/local/bin/rpi-ro, /usr/bin/rpi-rw, /usr/bin/rpi-ro, /bin/mount -o remount\,rw /, /bin/mount -o remount\,ro /, /usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py, /home/pi-star/MMDVM-Push-Notifier/update.sh\n" > "$SUDO_D"
 
 chmod 440 "$SUDO_D"
-visudo -cf "$SUDO_D" >/dev/null 2>&1 || { 
+
+# 使用 visudo -c -f 进行格式校验
+visudo -c -f "$SUDO_D" >/dev/null 2>&1 || { 
     echo "⚠️  Sudoers validation failed, removing custom file"
     rm -f "$SUDO_D"
 }
