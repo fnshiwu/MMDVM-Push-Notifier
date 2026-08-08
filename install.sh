@@ -1,5 +1,5 @@
 #!/bin/bash
-# MMDVM-Push-Notifier enhanced installer (v3.5.0-pistar4.3) | 强化版安装脚本
+# MMDVM-Push-Notifier enhanced installer (v3.5.1-pistar4.3) | 强化版安装脚本
 # Pi-Star 4.3.x (Debian 12 Bookworm) Compatible | 兼容 Pi-Star 4.3.x
 
 if [ "$EUID" -ne 0 ]; then 
@@ -17,7 +17,6 @@ PISTAR_PATCH=0
 
 if [ -f /etc/pistar-release ]; then
     PISTAR_VER=$(grep -oP 'Version=\K[^ ]+' /etc/pistar-release 2>/dev/null || echo "unknown")
-    # Parse version components
     if [[ "$PISTAR_VER" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
         PISTAR_MAJOR="${BASH_REMATCH[1]}"
         PISTAR_MINOR="${BASH_REMATCH[2]}"
@@ -49,7 +48,6 @@ fi
 echo "1. 正在获取磁盘写入权限..."
 mount -o remount,rw / 2>/dev/null
 
-# Try Pi-Star helper scripts with all possible paths | 兼容所有可能的 Pi-Star 脚本路径
 for cmd_path in /usr/local/sbin/rpi-rw /usr/local/bin/rpi-rw /usr/bin/rpi-rw; do
     if [ -x "$cmd_path" ]; then
         "$cmd_path"
@@ -65,7 +63,6 @@ mkdir -p $INSTALL_DIR
 
 # Create service user | 创建服务用户
 id -u mmdvm-push >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -U mmdvm-push
-# Ensure mmdvm-push is in www-data group to read config if owned by www-data | 确保用户在 www-data 组以读取配置
 usermod -a -G www-data mmdvm-push
 chown -R mmdvm-push:mmdvm-push $INSTALL_DIR
 chmod -R 755 $INSTALL_DIR
@@ -92,11 +89,9 @@ chmod 664 $CONFIG_FILE
 echo "Config file permission set to 664 (owner: mmdvm-push, group: www-data) | 配置文件权限已设置为 664（owner: mmdvm-push, group: www-data）"
 
 echo "3. Deploy Web admin (symlink) | 部署 Web 管理页面（软链接）..."
-# 确定并创建正确的网页后台目录结构
 WEB_ADMIN_DIR="/var/www/dashboard/admin"
 mkdir -p "$WEB_ADMIN_DIR" 2>/dev/null
 
-# 软链接至主目录和子目录，保持双向兼容
 ln -sf "$INSTALL_DIR/push_admin.php" "$WEB_ADMIN_DIR/push_admin.php"
 ln -sf "$INSTALL_DIR/push_admin.php" "/var/www/dashboard/push_admin.php" 2>/dev/null
 ln -sf "$INSTALL_DIR/push_admin.php" "/var/www/html/push_admin.php" 2>/dev/null
@@ -119,9 +114,7 @@ UPDATE_SCRIPT="$INSTALL_DIR/update.sh"
 chmod +x $UPDATE_SCRIPT
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
 
-# 生成严格无误且包含 /usr/bin/ 与 /bin/ 兼容路径的 Sudoers 规则
 cat > "$SUDO_D" <<'EOF'
-# MMDVM-Push-Notifier sudoers - Compatible with Pi-Star 4.3.5+
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop mmdvm_push.service
 www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart mmdvm_push.service
@@ -157,7 +150,6 @@ else
     exit 1
 fi
 
-# Clear tmpfs journal to avoid reload failure | 清理内存盘日志缓存避免重载失败
 rm -rf /run/log/journal/* 2>/dev/null
 
 systemctl daemon-reload
@@ -178,10 +170,6 @@ echo "   (Or via IP: http://$(hostname -I | awk '{print $1}')/admin/push_admin.p
 echo ""
 echo "⚙️  Config File: $CONFIG_FILE"
 echo "📂 Log Path:    /var/log/pi-star/mmdvm_push.log"
-echo "--------------------------------------------------------"
-echo "💡 Usage Tip:"
-echo "   Visit the Web Admin to set your API keys and callsign."
-echo "   Then click 'Send Test' to verify."
 echo "--------------------------------------------------------"
 HEALTH=$(python3 $INSTALL_DIR/mmdvm_push.py --health 2>/dev/null)
 if [ -n "$HEALTH" ]; then
