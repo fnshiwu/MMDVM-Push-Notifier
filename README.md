@@ -1,3 +1,5 @@
+
+
 # MMDVM-Push-Notifier
 
 一个专为 **Pi-Star / MMDVM** 设计的高性能通联与系统状态推送工具  
@@ -88,7 +90,7 @@ MMDVM-Push-Notifier/
 ├── uninstall.sh         # 卸载脚本（多路径清理、sudoers.d 规则清理）
 ├── diagnose.sh          # 诊断脚本（一键检查服务状态、日志、网络、推送测试）
 ├── mmdvm_push.service   # systemd 服务（资源限制、自动重启）
-└── tests/               # 轻量单元测试（parser/filters/notify）
+└── tests/               # 轻量单元测试（parser/filters/notify/cpu）
 
 ```
 
