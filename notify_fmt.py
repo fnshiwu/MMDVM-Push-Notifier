@@ -4,6 +4,13 @@
 # 为语音/数据事件生成中英文标题与内容
 from datetime import datetime
 
+
+def _mode_suffix(event: dict) -> str:
+    """Append digital mode to the title when available | 有模式信息时附加到标题"""
+    mode = (event.get('mode') or '').strip()
+    return f" · {mode}" if mode else ""
+
+
 def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     """Build type label and body text according to UI language | 根据界面语言生成类型标签与正文"""
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
@@ -13,15 +20,18 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
     loss = event['loss']
     ber = event['ber']
     slot = event['slot']
+    mode = (event.get('mode') or '').strip()
+    rssi = (event.get('rssi') or '').strip()
     loc_en = info.get('loc_en', info.get('loc', ''))
     loc_cn = info.get('loc_cn', info.get('loc', ''))
     now = datetime.now()
     date_str = now.strftime('%Y-%m-%d')
     time_str = now.strftime('%H:%M:%S')
+    suffix = _mode_suffix(event)
 
     if lang == 'en':
         body_parts = [
-            f"👤 <b>Callsign</b>: {call}{info.get('name','')}",
+            f"👤 <b>Callsign</b>: {call}{info.get('name', '')}",
             f"👥 <b>Talkgroup</b>: {target}",
             f"📍 <b>Location</b>: {loc_en}",
             f"📅 <b>Date</b>: {date_str}",
@@ -29,13 +39,17 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
             f"⏳ <b>Duration</b>: {dur}s",
             f"📦 <b>Loss</b>: {loss}%",
             f"📉 <b>BER</b>: {ber}%",
-            f"🌡️ <b>Temp</b>: {temp_str}"
         ]
+        if mode:
+            body_parts.append(f"📶 <b>Mode</b>: {mode}")
+        if rssi:
+            body_parts.append(f"📡 <b>RSSI</b>: {rssi} dBm")
+        body_parts.append(f"🌡️ <b>Temp</b>: {temp_str}")
         body = "\n".join(body_parts)
-        type_label = f"{'🎙️ Voice QSO' if event['is_voice'] else '💾 Data Mode'}{slot}"
+        type_label = f"{'🎙️ Voice QSO' if event['is_voice'] else '💾 Data Mode'}{suffix}{slot}"
     else:
         body_parts = [
-            f"👤 <b>呼号</b>: {call}{info.get('name','')}",
+            f"👤 <b>呼号</b>: {call}{info.get('name', '')}",
             f"👥 <b>群组</b>: {target}",
             f"📍 <b>地区</b>: {loc_cn}",
             f"📅 <b>日期</b>: {date_str}",
@@ -43,11 +57,17 @@ def format_message(conf: dict, event: dict, temp_str: str, info: dict):
             f"⏳ <b>时长</b>: {dur}秒",
             f"📦 <b>丢失</b>: {loss}%",
             f"📉 <b>误码</b>: {ber}%",
-            f"🌡️ <b>温度</b>: {temp_str}"
         ]
+        if mode:
+            body_parts.append(f"📶 <b>模式</b>: {mode}")
+        if rssi:
+            body_parts.append(f"📡 <b>信号</b>: {rssi} dBm")
+        body_parts.append(f"🌡️ <b>温度</b>: {temp_str}")
         body = "\n".join(body_parts)
-        type_label = f"{'🎙️ 语音通联' if event['is_voice'] else '💾 数据模式'}{slot}"
+        type_label = f"{'🎙️ 语音通联' if event['is_voice'] else '💾 数据模式'}{suffix}{slot}"
     return type_label, body
+
+
 def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: str, mem: str, network_ok: bool):
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
     now = datetime.now()
@@ -75,6 +95,8 @@ def format_boot_notice(conf: dict, version: str, ip: str, temp_str: str, cpu: st
         f"⏰ <b>时间</b>: {datetime_str}"
     )
     return "⚙️ 系统启动通知", body
+
+
 def format_temp_alert(conf: dict, display_str: str, threshold: float):
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
     if lang == 'en':
@@ -92,6 +114,8 @@ def format_temp_alert(conf: dict, display_str: str, threshold: float):
         f"⏰ <b>检测时间</b>: {datetime.now().strftime('%H:%M:%S')}"
     )
     return "🌡️ 硬件状态警告", body
+
+
 def format_test_push(conf: dict, version: str, ip: str, temp_str: str, cpu: str, mem: str):
     lang = (conf.get('ui_lang', 'cn') or 'cn').lower()
     if lang == 'en':

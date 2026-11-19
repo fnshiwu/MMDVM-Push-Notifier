@@ -1,23 +1,31 @@
 [Unit]
-Description=MMDVM Push Notifier
-After=network-online.target mmdvmhost.service
+Description=MMDVM Push Notifier (Pi-Star)
+Documentation=https://github.com/fnshiwu/MMDVM-Push-Notifier
+After=network-online.target time-sync.target mmdvmhost.service
 Wants=network-online.target
+# systemd 252+ (Debian 12 Bookworm): rate limiting lives in [Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=mmdvm-push
 Group=mmdvm-push
 WorkingDirectory=/home/pi-star/MMDVM-Push-Notifier
-ExecStart=/usr/bin/python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
-Restart=on-failure
+ExecStart=/usr/bin/python3 -u /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py
+Restart=always
 RestartSec=10
-# Debian 12 Bookworm / systemd 254+ recommended settings
+TimeoutStopSec=20
+# Journal output (Bookworm / systemd 252+)
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=mmdvm_push
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
 # Resource limits
 LimitNOFILE=1024
-MemoryMax=128M
+MemoryHigh=160M
+MemoryMax=224M
 
 [Install]
 WantedBy=multi-user.target

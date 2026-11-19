@@ -1,124 +1,193 @@
 #!/bin/bash
-# MMDVM 推送诊断脚本 (v2.1.0-pistar4.3.7)
-# Pi-Star 4.3.7 Compatible
+# MMDVM-Push-Notifier diagnostic tool
+# Pi-Star 4.2.x / 4.3.x - MMDVMHost
+# 一键诊断：权限、日志、解析、配置、网络、推送逐层检查
+set -o pipefail
+
+INSTALL_DIR="/home/pi-star/MMDVM-Push-Notifier"
+CONFIG_FILE="/etc/mmdvm_push.json"
+SERVICE="mmdvm_push.service"
+APP_LOG="/var/log/pi-star/mmdvm_push.log"
+
+RED=$'\033[31m'; GRN=$'\033[32m'; YLW=$'\033[33m'; NC=$'\033[0m'
+ok()   { echo "${GRN}✓${NC} $*"; }
+warn() { echo "${YLW}⚠${NC} $*"; }
+err()  { echo "${RED}✗${NC} $*"; }
+hr()   { echo "----------------------------------------"; }
 
 echo "=========================================="
-echo "MMDVM-Push-Notifier 诊断工具"
+echo " MMDVM-Push-Notifier 诊断工具"
+echo " 时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
 echo "=========================================="
-echo ""
 
-# Pi-Star Version Detection | Pi-Star 版本检测
 PISTAR_VER="unknown"
-if [ -f /etc/pistar-release ]; then
-    PISTAR_VER=$(grep -oP 'Version=\K[^ ]+' /etc/pistar-release 2>/dev/null || echo "unknown")
-fi
+[ -f /etc/pistar-release ] && PISTAR_VER=$(grep -oP 'Version=\K[^ ]+' /etc/pistar-release 2>/dev/null || echo "unknown")
 DEBIAN_VER=$(cat /etc/debian_version 2>/dev/null || echo "unknown")
-echo "系统信息: Pi-Star $PISTAR_VER / Debian $DEBIAN_VER"
-if [ -f /usr/lib/python3.11/EXTERNALLY-MANAGED ] || [ -f /usr/lib/python3.*/EXTERNALLY-MANAGED ] 2>/dev/null; then
-    echo "Python 环境: Externally Managed (Bookworm)"
-fi
+echo "Pi-Star: $PISTAR_VER   Debian: $DEBIAN_VER"
+echo "Python: $(python3 --version 2>&1)"
+echo "PHP   : $(php -r 'echo PHP_VERSION;' 2>/dev/null || echo missing)"
+echo "kernel: $(uname -r)   systemd: $(systemctl --version 2>/dev/null | head -1)"
 echo ""
 
-# 1. 检查服务状态
-echo "[1] 服务状态检查"
-echo "----------------------------------------"
-sudo systemctl status mmdvm_push | head -15
-echo ""
-
-# 2. 检查进程
-echo "[2] 进程检查"
-echo "----------------------------------------"
-ps aux | grep mmdvm_push | grep -v grep
-echo ""
-
-# 3. 检查最新日志
-echo "[3] 最新日志 (最后20行)"
-echo "----------------------------------------"
-LOG_FOUND=false
-for log_path in /var/log/pi-star/mmdvm_push.log /tmp/mmdvm_push.log; do
-    if [ -f "$log_path" ]; then
-        echo "日志位置: $log_path"
-        tail -20 "$log_path"
-        LOG_FOUND=true
-        break
-    fi
-done
-if [ "$LOG_FOUND" = false ]; then
-    echo "❌ 未找到日志文件"
-fi
-echo ""
-
-# 4. 检查配置文件
-echo "[4] 配置文件检查"
-echo "----------------------------------------"
-if [ -f /etc/mmdvm_push.json ]; then
-    echo "✓ 配置文件存在: /etc/mmdvm_push.json"
-    echo "配置内容:"
-    cat /etc/mmdvm_push.json | python3 -m json.tool 2>/dev/null || cat /etc/mmdvm_push.json
+# 1
+echo "[1] 服务状态"
+hr
+systemctl is-enabled "$SERVICE" >/dev/null 2>&1 && ok "开机自启: $(systemctl is-enabled "$SERVICE" 2>/dev/null)" || warn "未设置开机自启"
+if systemctl is-active --quiet "$SERVICE"; then
+    ok "运行状态: active"
+    systemctl status "$SERVICE" --no-pager 2>/dev/null | sed -n '1,6p'
 else
-    echo "❌ 配置文件不存在: /etc/mmdvm_push.json"
+    err "运行状态: $(systemctl is-active "$SERVICE" 2>/dev/null)"
+    journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null
 fi
 echo ""
 
-# 5. 检查 MMDVM 日志
-echo "[5] MMDVM 日志检查 (最后10行)"
-echo "----------------------------------------"
+# 2
+echo "[2] 进程与身份"
+hr
+ps -eo pid,user,etimes,rss,args | grep -E "mmdvm_push\.py" | grep -v grep || err "未找到 mmdvm_push.py 进程"
+echo ""
+
+# 3
+echo "[3] 目录与权限（关键项）"
+hr
+if id -u mmdvm-push >/dev/null 2>&1; then
+    ok "服务用户: mmdvm-push (组: $(id -nG mmdvm-push 2>/dev/null))"
+else
+    err "服务用户 mmdvm-push 不存在"
+fi
+
+if [ -d /var/log/pi-star ]; then
+    ok "日志目录存在: /var/log/pi-star ($(stat -c '%U:%G %a' /var/log/pi-star 2>/dev/null))"
+    if sudo -u mmdvm-push test -r /var/log/pi-star 2>/dev/null; then
+        ok "服务用户可读日志目录"
+    else
+        err "服务用户无法读取 /var/log/pi-star —— 这是收不到推送的最常见原因"
+        echo "   修复: sudo usermod -a -G pi-star mmdvm-push && sudo systemctl restart $SERVICE"
+    fi
+else
+    err "/var/log/pi-star 不存在（MMDVMHost 未安装或未运行）"
+fi
+
 LATEST_LOG=$(ls -t /var/log/pi-star/MMDVM-*.log 2>/dev/null | head -1)
 if [ -n "$LATEST_LOG" ]; then
-    echo "日志文件: $LATEST_LOG"
-    tail -10 "$LATEST_LOG"
+    ok "最新 MMDVM 日志: $LATEST_LOG ($(stat -c '%U:%G %a' "$LATEST_LOG" 2>/dev/null))"
+    if sudo -u mmdvm-push test -r "$LATEST_LOG" 2>/dev/null; then
+        ok "服务用户可读该日志文件"
+    else
+        err "服务用户无法读取 $LATEST_LOG"
+    fi
 else
-    echo "❌ 未找到 MMDVM 日志"
+    warn "未找到 /var/log/pi-star/MMDVM-*.log"
 fi
 echo ""
 
-# 6. 检查网络连接
-echo "[6] 网络连接检查"
-echo "----------------------------------------"
-echo "本机 IP: $(hostname -I 2>/dev/null || echo 'Unknown')"
-echo "测试网络连通性..."
-if ping -c 2 www.baidu.com >/dev/null 2>&1; then
-    echo "✓ 网络连通"
+# 4
+echo "[4] 配置"
+hr
+if [ -f "$CONFIG_FILE" ]; then
+    ok "配置文件: $CONFIG_FILE ($(stat -c '%U:%G %a' "$CONFIG_FILE" 2>/dev/null))"
+    if python3 -m json.tool "$CONFIG_FILE" >/dev/null 2>&1; then
+        ok "JSON 语法正确"
+    else
+        err "JSON 语法错误 —— 服务会退回默认配置"
+    fi
+    python3 - "$CONFIG_FILE" <<'PY'
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        c = json.load(fh)
+except Exception as exc:
+    print("  读取失败:", exc); raise SystemExit
+enabled = []
+if c.get("push_fs_enabled") and c.get("fs_webhook"): enabled.append("Feishu")
+if c.get("push_wx_enabled") and c.get("wx_token"): enabled.append("PushPlus")
+if c.get("push_tg_enabled") and c.get("tg_token") and c.get("tg_chat_id"): enabled.append("Telegram")
+print("  已启用通道:", ", ".join(enabled) if enabled else "无（!!! 至少启用一个通道）")
+print("  我的呼号:", c.get("my_callsign") or "(未设置)")
+print("  最小时长:", c.get("min_duration"), "s  静音:", c.get("quiet_mode", {}).get("enabled"))
+print("  log_dir :", c.get("log_dir") or "(自动探测)")
+PY
 else
-    echo "❌ 网络不通"
+    err "配置文件不存在: $CONFIG_FILE"
 fi
 echo ""
 
-# 7. 测试推送
-echo "[7] 测试推送"
-echo "----------------------------------------"
-cd /home/pi-star/MMDVM-Push-Notifier
-echo "运行测试推送..."
-sudo python3 mmdvm_push.py --test
-echo ""
-
-# 8. 健康检查
-echo "[8] 健康检查"
-echo "----------------------------------------"
-sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health 2>&1
-echo ""
-
-# 9. 系统环境检查 (Bookworm 特有)
-echo "[9] 系统环境检查"
-echo "----------------------------------------"
-echo "Python 版本: $(python3 --version 2>&1)"
-echo "PHP 版本: $(php -v 2>/dev/null | head -1 || echo 'Not installed')"
-echo "systemd 版本: $(systemctl --version 2>/dev/null | head -1 || echo 'Unknown')"
-
-# Check sudoers compatibility
-echo ""
-echo "Sudoers 检查:"
-if [ -f /etc/sudoers.d/pistar-dashboard ]; then
-    echo "  ✓ Pi-Star 4.3.5+ dashboard sudoers 存在"
-fi
-if [ -f /etc/sudoers.d/mmdvm-push-web ]; then
-    echo "  ✓ MMDVM-Push sudoers 存在"
-    visudo -cf /etc/sudoers.d/mmdvm-push-web >/dev/null 2>&1 && echo "  ✓ Sudoers 语法有效" || echo "  ❌ Sudoers 语法错误"
+# 5
+echo "[5] 解析器自检"
+hr
+if [ -f "$INSTALL_DIR/parser.py" ]; then
+    RES=$(python3 "$INSTALL_DIR/mmdvm_push.py" --selftest 2>/dev/null)
+    echo "  $RES"
+    echo "  真实日志最后一条通联行:"
+    if [ -n "$LATEST_LOG" ]; then
+        LAST=$(grep -a "end of" "$LATEST_LOG" 2>/dev/null | tail -1)
+        if [ -n "$LAST" ]; then
+            echo "    $LAST"
+            if python3 "$INSTALL_DIR/mmdvm_push.py" --parse "$LAST" >/dev/null 2>&1; then
+                ok "    该行可被解析"
+            else
+                err "    该行无法解析 —— 请把这一行反馈给作者以适配新日志格式"
+            fi
+        else
+            warn "    日志中暂无通联结束行"
+        fi
+    fi
 else
-    echo "  ❌ MMDVM-Push sudoers 不存在"
+    err "未找到 $INSTALL_DIR/parser.py"
 fi
+echo ""
+
+# 6
+echo "[6] 网络"
+hr
+echo "本机 IP: $(hostname -I 2>/dev/null | awk '{print $1}')"
+if ping -c 2 -W 2 223.5.5.5 >/dev/null 2>&1; then ok "ICMP 连通"; else warn "ICMP 不通（部分网络禁 ping，忽略）"; fi
+for url in https://www.pushplus.plus https://api.telegram.org https://open.feishu.cn; do
+    if curl -sS -m 6 -o /dev/null "$url" 2>/dev/null; then ok "可达 $url"; else warn "不可达 $url"; fi
+done
+echo ""
+
+# 7
+echo "[7] 推送测试"
+hr
+if [ -f "$INSTALL_DIR/mmdvm_push.py" ]; then
+    sudo python3 "$INSTALL_DIR/mmdvm_push.py" --test 2>&1 | tail -5
+else
+    err "未找到 mmdvm_push.py"
+fi
+echo ""
+
+# 8
+echo "[8] 健康状态 (JSON)"
+hr
+sudo python3 "$INSTALL_DIR/mmdvm_push.py" --health 2>&1 | tail -3
+echo ""
+
+# 9
+echo "[9] 运行日志（最后 15 行）"
+hr
+if [ -f "$APP_LOG" ]; then
+    tail -15 "$APP_LOG"
+else
+    warn "无 $APP_LOG，尝试 journalctl"
+    journalctl -u "$SERVICE" -n 15 --no-pager 2>/dev/null
+fi
+echo ""
+
+# 10
+echo "[10] sudoers"
+hr
+for f in /etc/sudoers.d/mmdvm-push-web /etc/sudoers.d/pistar-dashboard; do
+    if [ -f "$f" ]; then
+        visudo -cf "$f" >/dev/null 2>&1 && ok "$f 语法有效" || err "$f 语法错误"
+    else
+        warn "$f 不存在"
+    fi
+done
 
 echo ""
 echo "=========================================="
-echo "诊断完成"
+echo " 诊断完成"
+echo " 如需反馈问题，请附上本输出（注意隐去 Token）"
 echo "=========================================="

@@ -11,6 +11,12 @@ from copy import deepcopy
 PUSH_MAX_WORKERS = 3  # Maximum push worker threads | 最大推送工作线程数
 PUSH_RETRY = 2  # Number of push retries | 推送重试次数
 
+CONFIG_PATH = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
+
+# 默认日志目录候选（Pi-Star 4.2.x / 4.3.x 均为 /var/log/pi-star）
+DEFAULT_LOG_DIR = "/var/log/pi-star"
+
+
 class ConfigManager:
     """Configuration manager with hot-reload support | 支持热重载的配置管理器"""
     _config: Dict = {}
@@ -27,14 +33,15 @@ class ConfigManager:
         try:
             parsed = urllib.parse.urlparse(url)
             if parsed.scheme not in ('http', 'https'):
-                logging.getLogger(__name__).warning(f"Invalid URL scheme: {parsed.scheme}, URL: {url}")
+                logging.getLogger(__name__).warning(
+                    "Invalid URL scheme: %s, URL: %s", parsed.scheme, url)
                 return ""
             if not parsed.netloc:
-                logging.getLogger(__name__).warning(f"Invalid URL (no host): {url}")
+                logging.getLogger(__name__).warning("Invalid URL (no host): %s", url)
                 return ""
             return url
         except Exception as e:
-            logging.getLogger(__name__).warning(f"URL validation failed: {e}")
+            logging.getLogger(__name__).warning("URL validation failed: %s", e)
             return ""
 
     @staticmethod
@@ -42,11 +49,30 @@ class ConfigManager:
         """Validate token format | 验证 token 格式"""
         if not token:
             return ""
-        token = str(token).strip()
+        token = str(token).strip().strip("\"'")
         if len(token) < min_length:
-            logging.getLogger(__name__).warning(f"Token too short (< {min_length} chars)")
+            logging.getLogger(__name__).warning("Token too short (< %s chars)", min_length)
             return ""
         return token
+
+    @staticmethod
+    def _validate_callsign(value: str) -> str:
+        """Normalise callsign (upper case, no spaces, SSID kept) | 规范化呼号"""
+        value = str(value or "").strip().upper().replace(" ", "")
+        # keep A-Z 0-9 / - only
+        cleaned = "".join(ch for ch in value if ch.isalnum() or ch in "/-")
+        return cleaned
+
+    @staticmethod
+    def _validate_log_dir(value: str) -> str:
+        """Accept an absolute path only | 只接受绝对路径"""
+        value = str(value or "").strip()
+        if not value:
+            return ""
+        if not value.startswith("/"):
+            logging.getLogger(__name__).warning("log_dir must be absolute: %s", value)
+            return ""
+        return value.rstrip("/") or "/"
 
     @classmethod
     def _validate_config(cls, raw: Dict) -> Dict:
@@ -64,36 +90,52 @@ class ConfigManager:
             "boot_push_enabled": True,
             "temp_alert_enabled": True,
             "temp_threshold": 65.0,
-            "temp_interval": 30,  # Default 30 minutes | 默认30分钟
+            "temp_interval": 30,  # Minutes in JSON, seconds in memory | JSON 中为分钟
             "temp_unit": "C",
-            "ignore_list": "", "focus_list": "", "ui_lang": "cn"
+            "ignore_list": "", "focus_list": "", "ui_lang": "cn",
+            "log_dir": "",       # Empty = auto detect | 留空为自动探测
+            "dedup_window": 3.0  # Duplicate suppression window in seconds
         }
-        
+
         # Merge with defaults
         conf = dict(defaults)
         if isinstance(raw, dict):
             conf.update(raw)
-            
+
         try:
             # Numeric validations
             conf["min_duration"] = max(0.1, float(conf.get("min_duration", defaults["min_duration"])))
-            conf["temp_threshold"] = max(0.0, min(150.0, float(conf.get("temp_threshold", defaults["temp_threshold"]))))
-            
-            # === CRITICAL FIX: Unit Conversion (The "Unit Schizophrenia") ===
-            # Web UI inputs Minutes, Backend needs Seconds.
+            conf["temp_threshold"] = max(0.0, min(150.0, float(
+                conf.get("temp_threshold", defaults["temp_threshold"]))))
+            conf["dedup_window"] = max(0.0, min(60.0, float(
+                conf.get("dedup_window", defaults["dedup_window"]))))
+
+            # === Unit Conversion: Web UI inputs Minutes, backend needs Seconds ===
             # Web UI 输入为分钟，后端需要转换为秒。
-            raw_interval = int(conf.get("temp_interval", defaults["temp_interval"]))
+            try:
+                raw_interval = int(float(conf.get("temp_interval", defaults["temp_interval"])))
+            except (TypeError, ValueError):
+                raw_interval = defaults["temp_interval"]
             # Enforce minimum 1 minute (60 seconds)
-            conf["temp_interval"] = max(1, raw_interval) * 60 
+            conf["temp_interval"] = max(1, raw_interval) * 60
 
             # Unit normalization
             unit = str(conf.get("temp_unit", "C")).upper()
             conf["temp_unit"] = "F" if unit == "F" else "C"
 
+            # Language whitelist
+            lang = str(conf.get("ui_lang", "cn")).lower()
+            conf["ui_lang"] = "en" if lang == "en" else "cn"
+
             # Validate URLs and tokens
             conf["fs_webhook"] = cls._validate_url(conf.get("fs_webhook", ""))
             conf["wx_token"] = cls._validate_token(conf.get("wx_token", ""), min_length=10)
             conf["tg_token"] = cls._validate_token(conf.get("tg_token", ""), min_length=20)
+            conf["tg_chat_id"] = str(conf.get("tg_chat_id", "") or "").strip()
+
+            # Callsign / log dir
+            conf["my_callsign"] = cls._validate_callsign(conf.get("my_callsign", ""))
+            conf["log_dir"] = cls._validate_log_dir(conf.get("log_dir", ""))
 
             # Quiet mode structure check
             qm = conf.get("quiet_mode", defaults["quiet_mode"])
@@ -104,21 +146,20 @@ class ConfigManager:
                 "start": str(qm.get("start", "23:00")),
                 "end": str(qm.get("end", "07:00"))
             }
-            
+
         except Exception as e:
-            logging.getLogger(__name__).warning(f"Config sanitize error: {e}")
-            # Fallback to defaults for critical values if error occurs
+            logging.getLogger(__name__).warning("Config sanitize error: %s", e)
             if "temp_interval" not in conf:
-                conf["temp_interval"] = 1800 # 30 mins * 60
+                conf["temp_interval"] = 1800  # 30 mins * 60
 
         return conf
 
     @classmethod
-    def get_config(cls, path: str = "/etc/mmdvm_push.json") -> Dict:
-        """Get configuration with thread-safe reload (HIGH #5 fix)"""
+    def get_config(cls, path: str = None) -> Dict:
+        """Get configuration with thread-safe reload | 线程安全地获取配置（支持热重载）"""
+        path = path or CONFIG_PATH
         now = time.time()
 
-        # MEDIUM #3 fix: Always acquire lock for thread safety
         with cls._lock:
             # Check under lock to avoid redundant reads
             if now - cls._last_check_time < cls._check_interval:
@@ -127,7 +168,6 @@ class ConfigManager:
             cls._last_check_time = now
 
             if not os.path.exists(path):
-                # Ensure defaults are loaded if config is empty | 如果配置为空确保加载默认值
                 if not cls._config:
                     cls._config = cls._validate_config({})
                 return deepcopy(cls._config)
@@ -139,16 +179,13 @@ class ConfigManager:
                         raw = json.load(f)
                     cls._config = cls._validate_config(raw)
                     cls._last_mtime = mtime
-                    logging.getLogger(__name__).info(f"Config reloaded from {path}")
+                    logging.getLogger(__name__).info("Config reloaded from %s", path)
             except json.JSONDecodeError as e:
                 logging.getLogger(__name__).error(
-                    f"Config JSON parse error in {path}: {e}. "
-                    f"Using previous configuration. Please fix the JSON syntax."
-                )
+                    "Config JSON parse error in %s: %s. Using previous configuration.", path, e)
                 if not cls._config:
-                    # Return defaults if initial load fails
                     cls._config = cls._validate_config({})
             except OSError as e:
-                logging.getLogger(__name__).error(f"Config file read error: {e}")
+                logging.getLogger(__name__).error("Config file read error: %s", e)
 
             return deepcopy(cls._config)

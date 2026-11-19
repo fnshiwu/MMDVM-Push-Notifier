@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""MMDVM-Push-Notifier core service.
+
+Parses MMDVMHost logs and pushes QSO / system notifications.
+日志轮询 → 解析 → 过滤 → 推送。
+
+Validated on Pi-Star 4.2.x (Bullseye) and Pi-Star 4.3.x (Bookworm, Python 3.11).
+Tested against Python 3.9 - 3.13 (no removed/deprecated stdlib APIs).
+"""
 import os
-import time
+import sys
 import json
 import glob
-import sys
-import subprocess
-import atexit
-import logging
-import tempfile
-import urllib.request
+import time
+import signal
 import socket
-from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
+import logging
+import atexit
+import tempfile
+import platform
+from datetime import datetime, timedelta, timezone
+from typing import Dict, Optional, Any, List
 
 from parser import parse_line
 from filters import quiet_time, should_push
@@ -26,76 +34,140 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.5.0"
-CONFIG_FILE = "/etc/mmdvm_push.json"
-MMDVM_LOG_DIR = "/var/log/pi-star/"
+VERSION = "v3.6.0"
+CONFIG_FILE = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
-MEMORY_CHECK_INTERVAL = 3600  # Memory check interval in seconds
-MAX_LOG_ITERATIONS = 100000  # Max log loop iterations to prevent stale handles
+
+# Log discovery | 日志目录探测（Pi-Star 4.2.x / 4.3.x 首选 /var/log/pi-star）
+DEFAULT_LOG_DIR = "/var/log/pi-star"
+LOG_DIR_CANDIDATES = ("/var/log/pi-star", "/var/log/mmdvm", "/var/log/mmdvmhost", "/var/log")
+LOG_GLOBS = ("MMDVM-*.log", "MMDVM*.log", "mmdvmhost*.log", "mmdvm*.log")
+
+MEMORY_CHECK_INTERVAL = 3600   # Seconds between self memory audits
+MEMORY_THRESHOLD_KB = 96 * 1024  # Warn above 96 MB RSS
+MAX_LOG_ITERATIONS = 200000    # Max read loop iterations before reopening
+STALE_LOG_WARN = 900           # Warn if the MMDVM log has not been written for 15 min
+BOOT_NOTICE_ATTEMPTS = 10
+BOOT_NOTICE_INTERVAL = 8
+
+RUNNING = True
+
+
+def _install_signal_handlers():
+    """SIGTERM from systemd must exit cleanly so atexit can flush pushes."""
+    def _handler(signum, frame):
+        global RUNNING
+        RUNNING = False
+        logging.getLogger(__name__).info("Signal %s received, shutting down", signum)
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, _handler)
+        except (ValueError, OSError):
+            pass
+
 
 # =========================
-# Pi-Star Version Detection | Pi-Star 版本检测
+# Environment & Version Detection | 环境与版本探测
 # =========================
+def _read_first_line(path: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8", errors="ignore") as fh:
+            return fh.readline().strip()
+    except OSError:
+        return ""
+
+
 PISTAR_VERSION = "unknown"
-IS_BOOKWORM = False
-
 try:
-    with open("/etc/pistar-release", "r") as f:
-        for line in f:
-            if line.startswith("Version="):
-                PISTAR_VERSION = line.strip().split("=", 1)[1].strip()
+    with open("/etc/pistar-release", "r", encoding="utf-8", errors="ignore") as _f:
+        for _line in _f:
+            if _line.startswith("Version="):
+                PISTAR_VERSION = _line.strip().split("=", 1)[1].strip()
                 break
-except (FileNotFoundError, OSError):
+except OSError:
     pass
 
-try:
-    with open("/etc/debian_version", "r") as f:
-        debian_ver = f.read().strip()
-        if debian_ver.startswith("12"):
-            IS_BOOKWORM = True
-except (FileNotFoundError, OSError):
-    pass
+DEBIAN_VERSION = _read_first_line("/etc/debian_version") or "unknown"
+IS_BOOKWORM = DEBIAN_VERSION.startswith("12")
+IS_TRIXIE = DEBIAN_VERSION.startswith("13")
+if not IS_BOOKWORM and not IS_TRIXIE:
+    # EXTERNALLY-MANAGED is the reliable marker on Debian 12+
+    if glob.glob("/usr/lib/python3*/EXTERNALLY-MANAGED"):
+        IS_BOOKWORM = True
+PYTHON_VERSION = platform.python_version()
 
-# Check for externally managed Python (Bookworm marker)
-if os.path.exists("/usr/lib/python3.11/EXTERNALLY-MANAGED") or \
-   glob.glob("/usr/lib/python3.*/EXTERNALLY-MANAGED"):
-    IS_BOOKWORM = True
-
-# Version check for web interface
-if len(sys.argv) > 1 and sys.argv[1] == "--version":
-    print(VERSION)
-    sys.exit(0)
-
-# Logging Setup
+# Logging target | 日志目录
 APP_LOG_DIR = "/var/log/pi-star/"
-if not os.path.exists(APP_LOG_DIR) or not os.access(APP_LOG_DIR, os.W_OK):
+_APP_LOG_FILE = os.path.join(APP_LOG_DIR, "mmdvm_push.log")
+# The directory may be root-owned (0755) while the log file itself is owned by the
+# service user - accept either way before falling back to /tmp.
+# 目录可能属 root，但日志文件已授权给服务用户，两种可写都算正常。
+if not (os.path.isdir(APP_LOG_DIR)
+        and (os.access(APP_LOG_DIR, os.W_OK) or os.access(_APP_LOG_FILE, os.W_OK))):
     APP_LOG_DIR = tempfile.gettempdir()
 
-logger = None
-def setup_logging():
+logger = logging.getLogger(__name__)
+
+
+def setup_logging(quiet: bool = False):
+    """Configure file + console logging. quiet=True keeps stdout clean (JSON modes)."""
     global logger
+    handlers = []
     try:
-        logging.basicConfig(
-            filename=os.path.join(APP_LOG_DIR, 'mmdvm_push.log'),
-            level=logging.INFO,
-            format='[%(asctime)s] [%(levelname)s] %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-    except PermissionError:
-        logging.basicConfig(level=logging.INFO, format='%(message)s')
+        handlers.append(logging.FileHandler(os.path.join(APP_LOG_DIR, "mmdvm_push.log"),
+                                            encoding="utf-8"))
+    except (OSError, PermissionError):
+        pass
 
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s')
-    console.setFormatter(formatter)
-    logging.getLogger('').addHandler(console)
+    if not quiet:
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        handlers.append(console)
+
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s',
+                                  datefmt='%Y-%m-%d %H:%M:%S')
+    root = logging.getLogger()
+    for h in list(root.handlers):
+        root.removeHandler(h)
+    for h in handlers:
+        h.setFormatter(formatter)
+        root.addHandler(h)
+    if not handlers:
+        root.addHandler(logging.NullHandler())
+    root.setLevel(logging.INFO)
     logger = logging.getLogger(__name__)
+    return logger
 
-    # Log system info on startup
-    logger.info(f"MMDVM-Push-Notifier {VERSION} starting")
-    logger.info(f"Pi-Star Version: {PISTAR_VERSION}, Bookworm: {IS_BOOKWORM}")
+
+def _log_startup_banner():
+    logger.info("MMDVM-Push-Notifier %s starting (pid %s)", VERSION, os.getpid())
+    logger.info("Pi-Star %s / Debian %s / Python %s (bookworm=%s trixie=%s)",
+                PISTAR_VERSION, DEBIAN_VERSION, PYTHON_VERSION, IS_BOOKWORM, IS_TRIXIE)
+
 
 atexit.register(PushService.shutdown)
+
+
+# =========================
+# Log file helpers | 日志文件辅助函数
+# =========================
+def list_mmdvm_logs(directory: str) -> List[str]:
+    """Return existing MMDVM log candidates inside a directory."""
+    if not directory or not os.path.isdir(directory):
+        return []
+    found: List[str] = []
+    for pattern in LOG_GLOBS:
+        found.extend(glob.glob(os.path.join(directory, pattern)))
+    return [p for p in found if os.path.isfile(p)]
+
+
+def _usable(path: str) -> bool:
+    """File exists, is not empty and is readable by the service user."""
+    try:
+        return os.path.isfile(path) and os.path.getsize(path) > 0 and os.access(path, os.R_OK)
+    except OSError:
+        return False
+
 
 # =========================
 # Monitor Logic | 监控逻辑
@@ -107,24 +179,128 @@ class MMDVMMonitor:
         self.alerts = AlertManager(self.hw)
         self.identity = Identity(LOCAL_ID_FILE)
         self.last_activity_ts: float = 0.0
-        self._last_temp_check: float = 0.0 
+        self._last_temp_check: float = 0.0
+        self._log_dir_cache: Optional[str] = None
+        self._log_dir_ts: float = 0.0
+        self.current_log: Optional[str] = None
+        self._stale_warned_at: float = 0.0
 
+    # ---------- log discovery ----------
+    def resolve_log_dir(self, conf: Optional[Dict] = None) -> str:
+        """Pick the MMDVM log directory, honouring env/config overrides."""
+        now = time.time()
+        if self._log_dir_cache and now - self._log_dir_ts < 60:
+            return self._log_dir_cache
+
+        conf = conf or {}
+        candidates = [os.environ.get("MMDVM_LOG_DIR", ""), conf.get("log_dir", "")]
+        for candidate in candidates:
+            if candidate and os.path.isdir(candidate):
+                self._log_dir_cache, self._log_dir_ts = candidate, now
+                return candidate
+
+        # Prefer directories that really contain MMDVM logs
+        for directory in LOG_DIR_CANDIDATES:
+            if list_mmdvm_logs(directory):
+                self._log_dir_cache, self._log_dir_ts = directory, now
+                return directory
+        for directory in LOG_DIR_CANDIDATES:
+            if os.path.isdir(directory):
+                self._log_dir_cache, self._log_dir_ts = directory, now
+                return directory
+
+        self._log_dir_cache, self._log_dir_ts = DEFAULT_LOG_DIR, now
+        return DEFAULT_LOG_DIR
+
+    def get_latest_log(self, conf: Optional[Dict] = None) -> Optional[str]:
+        """Return the newest usable MMDVM log (UTC name first, then local date)."""
+        try:
+            dirs: List[str] = []
+            primary = self.resolve_log_dir(conf)
+            dirs.append(primary)
+            for directory in LOG_DIR_CANDIDATES:
+                if directory not in dirs:
+                    dirs.append(directory)
+
+            now_utc = datetime.now(timezone.utc)
+            now_local = datetime.now()
+            dates = [now_utc.date(), now_local.date(),
+                     now_utc.date() - timedelta(days=1), now_local.date() - timedelta(days=1)]
+
+            seen = set()
+            for directory in dirs:
+                for day in dates:
+                    candidate = os.path.join(directory, "MMDVM-%s.log" % day.isoformat())
+                    if candidate in seen:
+                        continue
+                    seen.add(candidate)
+                    if _usable(candidate):
+                        return candidate
+
+            files: List[str] = []
+            for directory in dirs:
+                files.extend(list_mmdvm_logs(directory))
+            files = [f for f in files if _usable(f)]
+            if files:
+                return max(files, key=os.path.getmtime)
+        except Exception as e:
+            logger.error("Error finding log file: %s", e)
+        return None
+
+    # ---------- network ----------
+    @staticmethod
+    def _probe_network() -> bool:
+        """Cheap connectivity probe: TCP 53 first, HTTP 204 as fallback."""
+        for host, port in (("223.5.5.5", 53), ("1.1.1.1", 53), ("8.8.8.8", 53)):
+            try:
+                with socket.create_connection((host, port), timeout=3):
+                    return True
+            except OSError:
+                continue
+        import urllib.request
+        for url in ("https://connectivitycheck.gstatic.com/generate_204",
+                    "http://connectivitycheck.platform.hicloud.com/generate_204"):
+            try:
+                with urllib.request.urlopen(url, timeout=4) as resp:
+                    if resp.status in (200, 204):
+                        return True
+            except Exception:
+                continue
+        return False
+
+    def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
+        logger.info("Starting network check...")
+        for attempt in range(max_attempts):
+            if not RUNNING:
+                return False
+            if self._probe_network():
+                logger.info("Network ready (attempt %s)", attempt + 1)
+                return True
+            time.sleep(interval)
+        logger.warning("Network check timed out")
+        return False
+
+    # ---------- system helpers ----------
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
+        if not PushService.has_channel(conf):
+            logger.warning("Boot notice skipped: no push channel enabled yet")
+            return
         ip, cpu, mem = self.hw.get_sys_info()
         temp_str, _ = self.hw.get_current_temp(conf)
         title, body = format_boot_notice(conf, VERSION, ip, temp_str, cpu, mem, network_ok)
-        attempts = 12
-        interval_sec = 10
-        for _ in range(attempts):
-            ok = PushService.send(conf, title, body, is_voice=False, async_mode=False)
-            if ok:
+        for attempt in range(BOOT_NOTICE_ATTEMPTS):
+            if not RUNNING:
                 return
-            time.sleep(interval_sec)
+            if PushService.send(conf, title, body, is_voice=False, async_mode=False):
+                logger.info("Boot notice delivered on attempt %s", attempt + 1)
+                return
+            time.sleep(BOOT_NOTICE_INTERVAL)
+        logger.error("Boot notice could not be delivered, giving up")
 
     def _proc_mem_rss_kb(self) -> str:
         try:
-            with open(f"/proc/{os.getpid()}/status", "r") as f:
-                for line in f:
+            with open("/proc/%d/status" % os.getpid(), "r", encoding="utf-8") as fh:
+                for line in fh:
                     if line.startswith("VmRSS:"):
                         parts = line.split()
                         return parts[1] if len(parts) >= 2 else "0"
@@ -132,134 +308,136 @@ class MMDVMMonitor:
         except Exception:
             return "0"
 
-    def get_latest_log(self) -> Optional[str]:
-        """Get latest log file with UTC support for Pi-Star"""
-        try:
-            current_date = datetime.utcnow().date()
-            utc_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{current_date}.log")
-            if os.path.exists(utc_log) and os.path.getsize(utc_log) > 0:
-                return utc_log
-
-            # Fallback to yesterday
-            yesterday = current_date - timedelta(days=1)
-            yesterday_log = os.path.join(MMDVM_LOG_DIR, f"MMDVM-{yesterday}.log")
-            if os.path.exists(yesterday_log) and os.path.getsize(yesterday_log) > 0:
-                return yesterday_log
-
-            # Fallback to glob
-            log_files = glob.glob(os.path.join(MMDVM_LOG_DIR, "MMDVM-*.log"))
-            valid_files = [f for f in log_files if os.path.isfile(f) and os.path.getsize(f) > 0]
-            return max(valid_files, key=os.path.getmtime) if valid_files else None
-        except Exception as e:
-            logger.error(f"Error finding log file: {e}")
-            return None
-
-    def check_network(self, max_attempts: int = 30, interval: float = 2) -> bool:
-        logger.info("Starting network check...")
-        for i in range(max_attempts):
-            try:
-                # Optimized check using socket first (lighter than subprocess)
-                urllib.request.urlopen("http://www.apple.com/library/test/success.html", timeout=3)
-                logger.info(f"Network ready (attempt {i+1})")
-                return True
-            except Exception:
-                time.sleep(interval)
-
-        logger.warning("Network check timed out")
-        return False
-
+    # ---------- main loop ----------
     def run(self):
-        conf = ConfigManager.get_config()
-        network_ok = self.check_network()
+        conf = ConfigManager.get_config(CONFIG_FILE)
+        log_dir = self.resolve_log_dir(conf)
+        logger.info("Using MMDVM log directory: %s", log_dir)
+        if not list_mmdvm_logs(log_dir):
+            logger.warning("No MMDVM log found in %s yet (MMDVMHost may not have written one)",
+                           log_dir)
 
+        network_ok = self.check_network()
         if conf.get('boot_push_enabled', True):
             self._send_boot_notice(conf, network_ok)
 
-        logger.info(f"{VERSION} Monitor ready, tailing logs...")
-
+        logger.info("%s Monitor ready, tailing logs...", VERSION)
         last_mem_check = time.time()
-
-        # Initialize temp check timer
         self._last_temp_check = time.time()
 
-        while True:
+        while RUNNING:
             try:
-                # 1. Resource Self-Audit (Hourly)
+                # 1. Resource self-audit (hourly) | 每小时自查内存
                 if time.time() - last_mem_check > MEMORY_CHECK_INTERVAL:
-                    rss_kb = int(self._proc_mem_rss_kb())
-                    if rss_kb > MEMORY_THRESHOLD_KB:
-                        logger.warning(f"High memory usage: {rss_kb}KB")
+                    try:
+                        rss_kb = int(self._proc_mem_rss_kb())
+                        if rss_kb > MEMORY_THRESHOLD_KB:
+                            logger.warning("High memory usage: %s KB", rss_kb)
+                    except (TypeError, ValueError):
+                        pass
                     last_mem_check = time.time()
 
-                # 2. Log Tailing Loop
-                current_log = self.get_latest_log()
+                # 2. Log tailing | 日志跟踪
+                conf = ConfigManager.get_config(CONFIG_FILE)
+                current_log = self.get_latest_log(conf)
                 if not current_log:
+                    self._warn_no_log(conf)
                     time.sleep(5)
                     continue
 
+                self.current_log = current_log
                 self._tail_log(current_log)
 
             except KeyboardInterrupt:
                 logger.info("Shutdown signal received.")
                 break
             except Exception as e:
-                logger.error(f"Main loop error: {e}")
+                logger.error("Main loop error: %s", e)
                 time.sleep(5)
 
+    def _warn_no_log(self, conf: Dict):
+        """Explain once an hour why nothing is being monitored."""
+        now = time.time()
+        if now - self._stale_warned_at < 3600:
+            return
+        self._stale_warned_at = now
+        directory = self.resolve_log_dir(conf)
+        if not os.path.isdir(directory):
+            logger.error("MMDVM log directory %s does not exist. "
+                         "Check MMDVMHost / permission (service user must be able to read it).",
+                         directory)
+        else:
+            logger.warning("No readable MMDVM-*.log in %s. "
+                           "If MMDVMHost is running, check: ls -l %s", directory, directory)
+
     def _tail_log(self, log_file: str):
-        max_iterations = MAX_LOG_ITERATIONS
         iteration_count = 0
         start_time = time.time()
 
         try:
-            with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-                f.seek(0, 2)
-                last_check_file = time.time()
+            with open(log_file, "r", encoding="utf-8", errors="ignore") as fh:
+                fh.seek(0, 2)
+                inode = os.fstat(fh.fileno()).st_ino
+                last_check = time.time()
 
-                while True:
+                while RUNNING:
                     iteration_count += 1
 
-                    # Periodic Reset
                     if time.time() - start_time > 3600:
                         iteration_count = 0
                         start_time = time.time()
 
-                    if iteration_count > max_iterations:
+                    if iteration_count > MAX_LOG_ITERATIONS:
                         logger.info("Max iterations reached, reloading log file...")
                         return
 
-                    # 3. Temperature Alert Check (The "Three-Body Problem" Fix)
-                    # Logic centralized here. Config provides 'temp_interval' in seconds.
-                    # 逻辑集中于此。配置中的 temp_interval 已转换为秒。
-                    conf = ConfigManager.get_config()
-                    temp_interval = conf.get('temp_interval', 1800) # Default 30 mins
-
+                    # Temperature alert is scheduled here (single owner) | 温度告警调度
+                    conf = ConfigManager.get_config(CONFIG_FILE)
+                    temp_interval = conf.get('temp_interval', 1800)  # Already in seconds
                     now_ts = time.time()
                     if now_ts - self._last_temp_check > temp_interval:
-                        # Call AlertManager to check threshold and format message
-                        alert_res = self.alerts.check_temp_alert(conf)
-                        if alert_res:
-                            title, body = alert_res
-                            PushService.send(conf, title, body, is_voice=False)
+                        try:
+                            alert_res = self.alerts.check_temp_alert(conf)
+                            if alert_res:
+                                title, body = alert_res
+                                PushService.send(conf, title, body, is_voice=False)
+                                logger.info("Temperature alert pushed")
+                        except Exception as e:
+                            logger.error("Temperature alert error: %s", e)
                         self._last_temp_check = now_ts
 
-                    # 4. Check for log rotation
-                    if time.time() - last_check_file > 5:
-                        if not os.path.exists(log_file):
+                    # Rotation / truncation / stale detection | 轮转、截断、静默检测
+                    if time.time() - last_check > 5:
+                        last_check = time.time()
+                        try:
+                            st = os.stat(log_file)
+                        except OSError:
                             return
-                        new_log = self.get_latest_log()
-                        if new_log and new_log != log_file:
-                            # Read remaining lines efficiently
-                            remaining = f.readlines()
-                            for line in remaining:
+
+                        if st.st_ino != inode:
+                            logger.info("Log file was replaced (rotation), reopening")
+                            return
+
+                        if st.st_size < fh.tell():
+                            logger.info("Log file was truncated, rewinding to start")
+                            fh.seek(0)
+
+                        new_log = self.get_latest_log(conf)
+                        if new_log and os.path.abspath(new_log) != os.path.abspath(log_file):
+                            for line in fh.readlines():
                                 self.process_line(line)
                             return
-                        last_check_file = time.time()
 
-                    # 5. Read line
-                    line = f.readline()
+                        if time.time() - st.st_mtime > STALE_LOG_WARN:
+                            if time.time() - self._stale_warned_at > 3600:
+                                self._stale_warned_at = time.time()
+                                logger.warning(
+                                    "No new MMDVM log lines for %d min (%s). "
+                                    "Is MMDVMHost running and logging?",
+                                    int((time.time() - st.st_mtime) / 60), log_file)
+
+                    line = fh.readline()
                     if not line:
-                        # Dynamic polling interval
                         idle_time = time.time() - self.last_activity_ts
                         sleep_time = 0.3 if idle_time < 60 else (0.5 if idle_time < 300 else 1.0)
                         time.sleep(sleep_time)
@@ -268,14 +446,14 @@ class MMDVMMonitor:
                     self.process_line(line)
 
         except Exception as e:
-            logger.error(f"Tail log error: {e}")
+            logger.error("Tail log error: %s", e)
 
     def process_line(self, line: str):
         event = parse_line(line)
         if not event:
             return
 
-        conf = ConfigManager.get_config()
+        conf = ConfigManager.get_config(CONFIG_FILE)
 
         if quiet_time(conf):
             return
@@ -283,71 +461,167 @@ class MMDVMMonitor:
         if not should_push(conf, event, self.last_msg):
             return
 
-        # Update last message state for deduplication
         curr_ts = time.time()
-        self.last_msg.update({
-            "call": event['call'], 
-            "target": event['target'],
-            "ts": curr_ts
-        })
+        self.last_msg.update({"call": event['call'],
+                              "target": event['target'],
+                              "ts": curr_ts})
         self.last_activity_ts = curr_ts
 
-        # Identity lookup and formatting
-        info = self.identity.get_info(event['call'])
+        try:
+            info = self.identity.get_info(event['call'])
+        except Exception as e:
+            logger.debug("Identity lookup failed for %s: %s", event['call'], e)
+            info = {"name": "", "loc_en": "Unknown", "loc_cn": "未知"}
+
         temp_str, _ = self.hw.get_current_temp(conf)
         type_label, body = format_message(conf, event, temp_str, info)
 
         PushService.send(conf, type_label, body, is_voice=event['is_voice'])
-        logger.info(f"Push sent: {event['call']} -> {event['target']}")
+        logger.info("Push queued: %s -> %s (%ss%s)",
+                    event['call'], event['target'], event['dur'],
+                    (", " + event['mode']) if event.get('mode') else "")
+
+    # ---------- health ----------
+    def health(self) -> Dict[str, Any]:
+        conf = ConfigManager.get_config(CONFIG_FILE)
+        ip, cpu_sys, mem_sys = self.hw.get_sys_info()
+        try:
+            cpu_proc = self.hw._cpu_percent_process(interval=0.1)
+        except Exception:
+            cpu_proc = "0"
+        try:
+            rss_kb = self._proc_mem_rss_kb()
+        except Exception:
+            rss_kb = "0"
+
+        log_dir = self.resolve_log_dir(conf)
+        latest = self.current_log if self.current_log and os.path.exists(self.current_log) \
+            else self.get_latest_log(conf)
+
+        log_dir_readable = os.path.isdir(log_dir) and os.access(log_dir, os.R_OK)
+        sample = ("M: 2026-05-01 12:00:00.000 DMR Slot 2, received RF end of voice transmission "
+                  "from BA4SMQ to TG 46001, 3.4 seconds, 0% packet loss, BER: 0.1%, RSSI: -45 dBm")
+        parser_ok = False
+        try:
+            parser_ok = parse_line(sample) is not None
+        except Exception:
+            parser_ok = False
+
+        return {
+            "version": VERSION,
+            "pistar_version": PISTAR_VERSION,
+            "debian_version": DEBIAN_VERSION,
+            "python_version": PYTHON_VERSION,
+            "is_bookworm": IS_BOOKWORM,
+            "is_trixie": IS_TRIXIE,
+            "app_log_dir": APP_LOG_DIR,
+            "app_log_writable": os.access(APP_LOG_DIR, os.W_OK),
+            "log_dir": log_dir,
+            "mmdvm_log_dir": log_dir,
+            "mmdvm_log_exists": os.path.isdir(log_dir),
+            "mmdvm_log_readable": log_dir_readable,
+            "current_log": latest or "",
+            "current_log_readable": bool(latest and _usable(latest)),
+            "service_user": _current_user(),
+            "config_path": CONFIG_FILE,
+            "config_exists": os.path.exists(CONFIG_FILE),
+            "config_valid": _config_is_valid(),
+            "parser_selftest": parser_ok,
+            "ip": ip,
+            "cpu_system": "%s%%" % cpu_sys,
+            "cpu_process": "%s%%" % cpu_proc,
+            "mem": mem_sys,
+            "mem_rss_kb": rss_kb,
+            "time": datetime.now().isoformat(timespec="seconds"),
+        }
+
+
+def _config_is_valid() -> bool:
+    """True only when the on-disk JSON parses | 只有磁盘上的 JSON 能解析才算有效"""
+    if not os.path.exists(CONFIG_FILE):
+        return False
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as fh:
+            return isinstance(json.load(fh), dict)
+    except (OSError, ValueError):
+        return False
+
+
+def _current_user() -> str:
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except Exception:
+        return os.environ.get("USER", "unknown")
+
 
 # =========================
 # Entry
 # =========================
-if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+def _print_json(payload: Dict[str, Any]):
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def main() -> int:
+    arg = sys.argv[1].lower() if len(sys.argv) > 1 else ""
+
+    if arg == "--version":
+        print(VERSION)
+        return 0
+
+    if arg == "--parse":
+        setup_logging(quiet=True)
+        text = " ".join(sys.argv[2:]).strip()
+        event = parse_line(text) if text else None
+        _print_json(event or {"matched": False})
+        return 0 if event else 1
+
+    if arg == "--selftest":
+        setup_logging(quiet=True)
+        monitor = MMDVMMonitor()
+        status = monitor.health()
+        _print_json({"parser_selftest": status["parser_selftest"],
+                     "version": VERSION,
+                     "log_dir": status["log_dir"],
+                     "current_log": status["current_log"]})
+        return 0 if status["parser_selftest"] else 1
+
+    if arg == "--health":
+        setup_logging(quiet=True)
+        try:
+            _print_json(MMDVMMonitor().health())
+            return 0
+        except Exception as e:
+            _print_json({"error": str(e), "config_valid": False, "version": VERSION})
+            return 1
+
+    if arg == "--test":
         setup_logging()
         monitor = MMDVMMonitor()
-        conf = ConfigManager.get_config()
+        conf = ConfigManager.get_config(CONFIG_FILE)
         ip, cpu, mem = monitor.hw.get_sys_info()
         temp_str, _ = monitor.hw.get_current_temp(conf)
-        title, test_body = format_test_push(conf, VERSION, ip, temp_str, cpu, mem)
-        PushService.send(conf, title, test_body, is_voice=False, async_mode=False)
-        print("Success")
-    elif len(sys.argv) > 1 and sys.argv[1] == "--health":
-        # Health check JSON output
-        try:
-            conf = ConfigManager.get_config()
-            mon = MMDVMMonitor()
-            ip, cpu_sys, mem_sys = mon.hw.get_sys_info()
-            cpu_proc = mon.hw._cpu_percent_process(interval=0.1) # Non-blocking approx
-            rss_kb = mon._proc_mem_rss_kb()
+        title, body = format_test_push(conf, VERSION, ip, temp_str, cpu, mem)
+        ok = PushService.send(conf, title, body, is_voice=False, async_mode=False)
+        if ok:
+            print("Success")
+            logger.info("Test push delivered")
+            return 0
+        print("Failed: no channel accepted the message (check enable flags, tokens, network)")
+        logger.error("Test push failed")
+        return 1
 
-            # Detect log directory writability
-            app_log_writable = os.path.exists(APP_LOG_DIR) and os.access(APP_LOG_DIR, os.W_OK)
-            if not app_log_writable:
-                app_log_writable = os.access(tempfile.gettempdir(), os.W_OK)
+    setup_logging()
+    _install_signal_handlers()
+    _log_startup_banner()
 
-            status = {
-                "version": VERSION,
-                "pistar_version": PISTAR_VERSION,
-                "is_bookworm": IS_BOOKWORM,
-                "app_log_dir": APP_LOG_DIR if os.path.exists(APP_LOG_DIR) else tempfile.gettempdir(),
-                "app_log_writable": app_log_writable,
-                "mmdvm_log_dir": MMDVM_LOG_DIR,
-                "mmdvm_log_exists": os.path.exists(MMDVM_LOG_DIR),
-                "config_exists": os.path.exists(CONFIG_FILE),
-                "config_valid": True,
-                "ip": ip,
-                "cpu_system": f"{cpu_sys}%",
-                "mem": mem_sys,
-                "cpu_process": f"{cpu_proc}%",
-                "mem_rss_kb": rss_kb,
-                "time": datetime.now().isoformat(timespec="seconds")
-            }
-            print(json.dumps(status, ensure_ascii=False))
-        except Exception as e:
-            print(json.dumps({"error": str(e), "config_valid": False, "version": VERSION}, ensure_ascii=False))
-    else:
-        setup_logging()
-        monitor = MMDVMMonitor()
-        monitor.run()
+    monitor = MMDVMMonitor()
+    monitor.run()
+
+    logger.info("MMDVM-Push-Notifier stopped")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
