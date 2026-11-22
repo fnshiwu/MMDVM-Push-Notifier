@@ -419,8 +419,15 @@ class MMDVMMonitor:
                             return
 
                         if st.st_size < fh.tell():
-                            logger.info("Log file was truncated, rewinding to start")
-                            fh.seek(0)
+                            # The file was rewritten from offset 0. Reading it from
+                            # the start would replay every historical QSO as a new
+                            # event (dedup only covers a 3s window). Return so the
+                            # main loop reopens the current log and tails from its end.
+                            # 日志被截断重写：从文件头重读会把历史通联当新事件全部推送，
+                            # 直接返回让主循环重新打开文件并从末尾继续跟踪。
+                            logger.info("Log file was truncated, reopening from end "
+                                        "to avoid replaying old entries")
+                            return
 
                         new_log = self.get_latest_log(conf)
                         if new_log and os.path.abspath(new_log) != os.path.abspath(log_file):

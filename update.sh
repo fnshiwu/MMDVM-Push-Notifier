@@ -18,10 +18,33 @@ echo "--- MMDVM-Push-Notifier 更新流程开始 ---"
 # =========================
 # 1) Read-write root | 切换读写
 # =========================
-mount -o remount,rw / 2>/dev/null
+ROOT_RW_BY_US=0
+if mount -o remount,rw / 2>/dev/null; then
+    ROOT_RW_BY_US=1
+fi
 for cmd_path in /usr/local/sbin/rpi-rw /usr/local/bin/rpi-rw /usr/bin/rpi-rw; do
     [ -x "$cmd_path" ] && { "$cmd_path"; break; }
 done
+
+# Restore read-only root on EVERY exit path (including early failures such as
+# a failed git sync or syntax check), not only on the success path at the end.
+# 任何退出路径（含中途失败）都恢复只读根分区，避免把 Pi-Star 留在 rw 状态。
+restore_root_ro() {
+    trap - EXIT
+    for cmd_path in /usr/local/sbin/rpi-ro /usr/local/bin/rpi-ro /usr/bin/rpi-ro; do
+        if [ -x "$cmd_path" ]; then
+            "$cmd_path"
+            return 0
+        fi
+    done
+    if [ "$ROOT_RW_BY_US" -eq 1 ]; then
+        mount -o remount,ro / 2>/dev/null || \
+            warn "无法恢复根分区只读，请手动执行: mount -o remount,ro /"
+    fi
+}
+trap restore_root_ro EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 cd "$INSTALL_DIR" || { err "无法进入 $INSTALL_DIR"; exit 1; }
 
@@ -156,7 +179,5 @@ HEALTH=$(python3 "$INSTALL_DIR/mmdvm_push.py" --health 2>/dev/null)
 [ -n "$HEALTH" ] && echo "健康状态: $HEALTH"
 echo "--- 更新完成 ($ACTUAL_VER) ---"
 
-for cmd_path in /usr/local/sbin/rpi-ro /usr/local/bin/rpi-ro /usr/bin/rpi-ro; do
-    [ -x "$cmd_path" ] && { "$cmd_path"; break; }
-done
+# Root filesystem is restored to read-only by the EXIT trap above | 由 EXIT trap 统一恢复只读
 exit 0

@@ -29,14 +29,22 @@ def _ssl_contexts():
     contexts = []
     try:
         contexts.append(ssl.create_default_context())
-    except Exception:
-        pass
-    # Fallback: Pi-Star Bookworm ships ca-certificates, but a broken bundle
-    # must never silently stop all notifications | 证书链异常时降级但不静默失败
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    contexts.append(ctx)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "Cannot create verified TLS context (%s); trying unverified context", e)
+    # Fallback must NOT call create_default_context() again: if the CA bundle is
+    # broken the first call already raised, and an identical call outside this
+    # try block would raise again and take down every push channel.
+    # Build a bare TLS context with verification explicitly disabled instead.
+    # 证书链异常时降级为独立的不校验上下文，避免所有推送通道一起失效。
+    try:
+        protocol = getattr(ssl, "PROTOCOL_TLS_CLIENT", ssl.PROTOCOL_TLS)
+        ctx = ssl.SSLContext(protocol)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        contexts.append(ctx)
+    except Exception as e:
+        logging.getLogger(__name__).error("Cannot create fallback TLS context: %s", e)
     return contexts
 
 

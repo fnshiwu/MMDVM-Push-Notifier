@@ -37,11 +37,34 @@ echo "=========================================="
 # 1) Read-write root | 切换根分区读写
 # =========================
 echo "1. 申请磁盘写入权限..."
-mount -o remount,rw / 2>/dev/null
+ROOT_RW_BY_US=0
+if mount -o remount,rw / 2>/dev/null; then
+    ROOT_RW_BY_US=1
+fi
 for cmd_path in /usr/local/sbin/rpi-rw /usr/local/bin/rpi-rw /usr/bin/rpi-rw; do
     [ -x "$cmd_path" ] && { "$cmd_path"; break; }
 done
 mount -o remount,size=32M /run 2>/dev/null
+
+# Restore read-only root on EVERY exit path (including early failures such as
+# a missing file or a Python syntax error), not only on the success path at the
+# end. 任何退出路径（含中途失败）都恢复只读根分区，避免把 Pi-Star 留在 rw 状态。
+restore_root_ro() {
+    trap - EXIT
+    for cmd_path in /usr/local/sbin/rpi-ro /usr/local/bin/rpi-ro /usr/bin/rpi-ro; do
+        if [ -x "$cmd_path" ]; then
+            "$cmd_path"
+            return 0
+        fi
+    done
+    if [ "$ROOT_RW_BY_US" -eq 1 ]; then
+        mount -o remount,ro / 2>/dev/null || \
+            warn "无法恢复根分区只读，请手动执行: mount -o remount,ro /"
+    fi
+}
+trap restore_root_ro EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # =========================
 # 2) Directories, user, groups | 目录、服务用户、权限组
@@ -202,7 +225,7 @@ try:
         fh.writelines(lines)
     print("  (导航链接已注入)")
 except OSError as exc:
-    print("  (写入失败: %s)".format(exc))
+    print("  (写入失败: %s)" % exc)
 PY
     chown www-data:www-data "$ADMIN_INDEX" 2>/dev/null
     chmod 664 "$ADMIN_INDEX" 2>/dev/null
@@ -270,8 +293,5 @@ echo "--------------------------------------------------------"
 HEALTH=$(python3 "$INSTALL_DIR/mmdvm_push.py" --health 2>/dev/null)
 [ -n "$HEALTH" ] && echo "健康状态: $HEALTH"
 
-# Restore read-only root if the helper exists | 恢复只读根分区
-for cmd_path in /usr/local/sbin/rpi-ro /usr/local/bin/rpi-ro /usr/bin/rpi-ro; do
-    [ -x "$cmd_path" ] && { "$cmd_path"; break; }
-done
+# Root filesystem is restored to read-only by the EXIT trap above | 由 EXIT trap 统一恢复只读
 exit 0
