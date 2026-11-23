@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import math
 import logging
 import urllib.parse
 from threading import Lock
@@ -10,11 +11,30 @@ from copy import deepcopy
 # Global constants | 全局常量
 PUSH_MAX_WORKERS = 3  # Maximum push worker threads | 最大推送工作线程数
 PUSH_RETRY = 2  # Number of push retries | 推送重试次数
+PUSH_MAX_QUEUE = 64  # Max queued notifications before dropping | 队列上限，超出即丢弃
+PUSH_TIME_BUDGET = 25.0  # Hard wall-clock budget per channel (seconds) | 单渠道总耗时上限
 
 CONFIG_PATH = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
 
 # 默认日志目录候选（Pi-Star 4.2.x / 4.3.x 均为 /var/log/pi-star）
 DEFAULT_LOG_DIR = "/var/log/pi-star"
+
+
+def _num(value, default, lo=None, hi=None):
+    """Convert to float with a default and optional clamp | 转 float，失败回落默认值"""
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return float(default)
+    # NaN/Inf are valid floats but break int() and arithmetic comparisons.
+    # NaN/Inf 虽是合法 float，却会让 int() 抛错或让比较永远为假，必须在这里拦下。
+    if not math.isfinite(val):
+        return float(default)
+    if lo is not None:
+        val = max(lo, val)
+    if hi is not None:
+        val = min(hi, val)
+    return val
 
 
 class ConfigManager:
@@ -91,6 +111,7 @@ class ConfigManager:
             "temp_alert_enabled": True,
             "temp_threshold": 65.0,
             "temp_interval": 30,  # Minutes in JSON, seconds in memory | JSON 中为分钟
+            "temp_hysteresis": 3.0,  # Cooling needed to re-arm an alert | 告警复位迟滞
             "temp_unit": "C",
             "ignore_list": "", "focus_list": "", "ui_lang": "cn",
             "log_dir": "",       # Empty = auto detect | 留空为自动探测
@@ -103,19 +124,20 @@ class ConfigManager:
             conf.update(raw)
 
         try:
-            # Numeric validations
-            conf["min_duration"] = max(0.1, float(conf.get("min_duration", defaults["min_duration"])))
-            conf["temp_threshold"] = max(0.0, min(150.0, float(
-                conf.get("temp_threshold", defaults["temp_threshold"]))))
-            conf["dedup_window"] = max(0.0, min(60.0, float(
-                conf.get("dedup_window", defaults["dedup_window"]))))
+            # Each field is converted independently: one bad value must not skip
+            # the validation of everything after it.
+            # 每个字段独立转换：单个坏值不应让后续字段全部跳过校验。
+            conf["min_duration"] = _num(conf.get("min_duration"), defaults["min_duration"], lo=0.1)
+            conf["temp_threshold"] = _num(conf.get("temp_threshold"), defaults["temp_threshold"],
+                                          lo=0.0, hi=150.0)
+            conf["dedup_window"] = _num(conf.get("dedup_window"), defaults["dedup_window"],
+                                        lo=0.0, hi=60.0)
+            conf["temp_hysteresis"] = _num(conf.get("temp_hysteresis"), defaults["temp_hysteresis"],
+                                           lo=0.5, hi=20.0)
 
             # === Unit Conversion: Web UI inputs Minutes, backend needs Seconds ===
             # Web UI 输入为分钟，后端需要转换为秒。
-            try:
-                raw_interval = int(float(conf.get("temp_interval", defaults["temp_interval"])))
-            except (TypeError, ValueError):
-                raw_interval = defaults["temp_interval"]
+            raw_interval = int(_num(conf.get("temp_interval"), defaults["temp_interval"]))
             # Enforce minimum 1 minute (60 seconds)
             conf["temp_interval"] = max(1, raw_interval) * 60
 

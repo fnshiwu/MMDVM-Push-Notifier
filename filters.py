@@ -8,9 +8,13 @@ import time
 import re
 from functools import lru_cache
 
-# Accept ";" "；" "," "," newline as separators | 支持中英文分号、逗号、换行分隔
+# Accept ";" "；" "," "，" and whitespace as separators | 支持中英文分号、逗号、空白分隔
 _SPLIT_RE = re.compile(r'[;；,，\s]+')
 _CS_RE = re.compile(r'^[A-Z0-9][A-Z0-9/\-]*$')
+
+# Dedup store growth guards | 去重表容量上限
+_MAX_SEEN_ENTRIES = 512   # Start pruning above this | 超过后开始清理过期项
+_HARD_SEEN_ENTRIES = 4096  # Absolute ceiling: reset rather than leak | 硬上限，超出直接清空
 
 
 @lru_cache(maxsize=256)
@@ -71,8 +75,29 @@ def quiet_time(conf: dict) -> bool:
     return now >= start or now <= end
 
 
-def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
-    """Decide whether to push based on filters and deduplication | 根据过滤器和去重逻辑判断是否推送"""
+def _prune_seen(seen: dict, now: float, window: float):
+    """Drop entries that can no longer block anything | 清理已过期的去重记录"""
+    if len(seen) <= _MAX_SEEN_ENTRIES:
+        return
+    cutoff = now - max(window, 1.0)
+    for key in [k for k, ts in seen.items() if ts < cutoff]:
+        seen.pop(key, None)
+    if len(seen) > _HARD_SEEN_ENTRIES:
+        # A burst of unique calls inside one window cannot be pruned; dropping the
+        # table only costs a possible duplicate, never memory growth.
+        # 窗口内的大量唯一呼号无法清理；清空只会多推一条，不会让内存无限增长。
+        seen.clear()
+
+
+def should_push(conf: dict, event: dict, last_msg: dict = None, seen: dict = None) -> bool:
+    """Decide whether to push based on filters and deduplication | 根据过滤器和去重逻辑判断是否推送
+
+    ``seen`` is a ``(call, target) -> timestamp`` map owned by the caller. When it is
+    provided, a passing event is recorded into it, so A-B-A alternation is deduped
+    correctly (the legacy single-entry ``last_msg`` comparison is kept as fallback).
+    ``seen`` 为调用方持有的 `(呼号, 目标) -> 时间戳` 表；传入时通过的事件会被登记，
+    这样 A-B-A 交替不会再重复推送；不传时退回旧的单条比较逻辑。
+    """
     focus = _parse_list(conf.get('focus_list', []))
     ignore = _parse_list(conf.get('ignore_list', []))
     my_callsign = _base_call(conf.get('my_callsign', '') or '')
@@ -99,10 +124,32 @@ def should_push(conf: dict, event: dict, last_msg: dict) -> bool:
     if dur < min_duration:
         return False
 
-    # 4. Deduplication logic | 去重
+    # 4. Deduplication | 去重
+    now = time.time()
+    key = (call, target)
+
+    if seen is not None:
+        _prune_seen(seen, now, dedup_window)
+        last_ts = seen.get(key)
+        if last_ts is not None and now - last_ts < dedup_window:
+            return False
+        seen[key] = now
+        return True
+
+    last_msg = last_msg or {}
     if (call == (last_msg.get("call") or "") and
             target == (last_msg.get("target") or "") and
-            (time.time() - float(last_msg.get("ts") or 0)) < dedup_window):
+            (now - float(last_msg.get("ts") or 0)) < dedup_window):
         return False
 
     return True
+
+
+def forget_pushed(seen: dict, event: dict) -> None:
+    """Allow the same QSO to be pushed again after a delivery failure | 推送失败后允许重发"""
+    if not seen:
+        return
+    try:
+        seen.pop((event['call'].upper(), event['target']), None)
+    except Exception:
+        pass

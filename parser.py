@@ -95,6 +95,9 @@ def parse_line(line: str):
         loss_str = '0'
 
     # Parse and validate BER percentage | 解析并校验误码率
+    # Some MMDVMHost builds omit "BER:" entirely (data frames, truncated lines),
+    # so the fallback must never resurrect the raw None group.
+    # 部分固件（数据帧、被截断的行）不含 BER 字段，兜底值不能被原始分组覆盖。
     ber_str = m.group('ber') or '0.0'
     try:
         ber_val = float(ber_str)
@@ -102,7 +105,7 @@ def parse_line(line: str):
             logging.getLogger(__name__).warning("Invalid BER percentage: %s%%", ber_val)
             ber_str = '0.0'
         else:
-            ber_str = m.group('ber')
+            ber_str = str(ber_val)
     except (ValueError, TypeError):
         ber_str = '0.0'
 

@@ -37,6 +37,22 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(conf["temp_interval"], 1800)
         self.assertFalse(conf["quiet_mode"]["enabled"])
 
+    def test_non_finite_values_do_not_skip_later_validation(self):
+        # float("nan") is valid input to float() but breaks int() and every
+        # numeric comparison. One bad field must not abort sanitising the rest.
+        conf = ConfigManager._validate_config({
+            "temp_interval": "nan",
+            "min_duration": "inf",
+            "dedup_window": float("nan"),
+            "fs_webhook": "ftp://bad-scheme/x",
+            "my_callsign": " ba4smq-1 ",
+        })
+        self.assertEqual(conf["temp_interval"], 1800)
+        self.assertEqual(conf["min_duration"], 4.0)
+        self.assertEqual(conf["dedup_window"], 3.0)
+        self.assertEqual(conf["fs_webhook"], "")
+        self.assertEqual(conf["my_callsign"], "BA4SMQ-1")
+
 
 if __name__ == '__main__':
     unittest.main()

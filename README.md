@@ -13,15 +13,34 @@
 Designed for long-term, unattended operation on Pi-Star systems. Validated on **Pi-Star 4.3.7 (Debian 12 Bookworm)** and still compatible with **Pi-Star 4.2.x (Bullseye)**.  
 本项目面向 Pi-Star 的长期稳定运行场景设计，已在 Pi-Star 4.3.7（Debian 12 Bookworm）实机验证，并向下兼容 4.2.x。
 
-> **v3.6.0 更新重点（本次针对新系统做了完整适配）**
+> **v3.6.2 更新重点（Open Code Review 审计修复版）**
+> * 修复 `NaN` / `Inf` 配置值绕过校验：单个非有限数值不再中断后续所有字段的清洗
+> * 修复去重表跨线程并发访问：`tail` 线程与推送线程共用同一把锁，繁忙中继下不会因 `dictionary changed size during iteration` 停掉日志监听
+> * 修复飞书 webhook 带尾部斜杠时 hook id 明文进入错误日志的问题
+> * 修复诊断脚本嵌套 `sudo` 造成的假告警，并修正推送失败计数的 `grep` 兜底
+> * 安装脚本注入导航链接时跳过 PHP 注释行，避免「文件里有链接、页面上没按钮」
+> * 测试从 78 项增加到 83 项
+>
+> **v3.6.1 更新重点（审核修复版，建议所有 3.6.0 用户升级）**
+> * 修复 `ber` 缺失时推送正文出现「误码: None%」（数据帧/短格式行会触发）
+> * 修复 Web 面板以 `www-data` 身份采集健康数据导致的假红灯（改以服务用户身份采集，缺规则时明确标注「仅供参考」）
+> * 修复 Telegram 消息未转义 `&` / `<` 导致整条推送被 400 拒绝（飞书 lark_md 单独转换）
+> * 推送队列改为有上限 + 单渠道总耗时预算，网络长时间中断不再堆积内存
+> * TLS 降级只对证书错误生效、有日志与计数；Telegram（token 在 URL 里）禁止降级
+> * 推送失败会写 `PUSH_FAILED` 标记，面板显示「最近推送失败」次数与最后一条；失败后释放去重记录，同一通联的下一行还能补推
+> * `update.sh` 回滚改为整体 `git reset --hard <原提交>`，不再出现「半新半旧」工作区
+> * 高温告警加迟滞（`temp_hysteresis`，默认 3.0），温度在阈值附近抖动不再反复推送
+> * 面板：token/secret 改为掩码显示（留空即不修改）、语言切换改走 POST+CSRF、读写挂载状态按原样恢复、增加安全响应头
+> * 呼号表检索校验字段位置，姓名/城市里出现同串不再误命中
+> * 测试从 26 项扩展，覆盖无 BER 行、HTML 转义、TLS/失败路径、队列上限、日志截断、告警迟滞、呼号误命中
+>
+> **v3.6.0 更新重点（Pi-Star 4.3.7 / Bookworm 完整适配）**
 > * 日志目录自动探测（`log_dir` 可配置，不再写死 `/var/log/pi-star`）
 > * 解析器支持新版 MMDVMHost 日志行（`received RF/network end of voice transmission ... RSSI: -45 dBm`），并支持 DMR / D-Star / YSF / P25 / NXDN / M17 / POCSAG 多模式
 > * 修复服务用户读不到 `/var/log/pi-star` 导致「一条推送都收不到」的根因（安装/更新脚本自动加入 `pi-star` 组）
-> * 修复主循环 `MEMORY_THRESHOLD_KB` 未定义导致的每小时异常
-> * `--health` / `--parse` / `--selftest` 输出纯净 JSON，不再被日志污染，Web 面板可正常显示健康状态
+> * `--health` / `--parse` / `--selftest` 输出纯净 JSON，不再被日志污染
 > * 推送结果校验（Telegram `ok`、PushPlus `code=200`、飞书 `code=0`），失败不再静默当成功
-> * PHP 8.2/8.3 完全兼容，Web 面板新增 Python/PHP 版本、当前日志文件、解析器自检、日志尾部查看
-> * systemd 单元适配 systemd 252+（限流放到 `[Unit]`、`Restart=always`、合理内存上限）
+> * PHP 8.2/8.3 完全兼容；systemd 单元适配 systemd 252+
 
 ---
 
@@ -104,7 +123,7 @@ MMDVM-Push-Notifier/
 ├── uninstall.sh         # 卸载脚本（多路径清理、sudoers.d 规则清理）
 ├── diagnose.sh          # 诊断脚本（权限/日志/解析/网络/推送逐层检查）
 ├── mmdvm_push.service   # systemd 服务（systemd 252+、自动重启、资源限制）
-└── tests/               # 轻量单元测试（parser/filters/notify）
+└── tests/               # 单元测试（parser/config/filters/notify_fmt/notifier/alerts/identity/service）
 ```
 
 ---
@@ -126,11 +145,11 @@ sudo bash install.sh
 ## 🧪 测试与诊断 | Testing & Diagnostics
 
 ```bash
-# 1) 推送测试（会真实发送一条消息）
-sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
+# 1) 推送测试（会真实发送一条消息，以服务用户身份运行）
+sudo -u mmdvm-push python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --test
 
 # 2) 健康检查（纯 JSON，适合脚本/面板调用）
-sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
+sudo -u mmdvm-push python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --health
 
 # 3) 解析器自检
 sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --selftest
@@ -140,6 +159,9 @@ sudo python3 /home/pi-star/MMDVM-Push-Notifier/mmdvm_push.py --parse "$(grep -a 
 
 # 5) 一键诊断
 cd /home/pi-star/MMDVM-Push-Notifier && sudo bash diagnose.sh
+
+# 6) 单元测试（无第三方依赖）
+cd /home/pi-star/MMDVM-Push-Notifier && python3 -m unittest discover -s tests -t . -v
 ```
 
 `diagnose.sh` 会自动检查：服务状态、进程身份、**日志目录/日志文件对服务用户是否可读**、配置 JSON、解析器、网络、推送通道、sudoers。
@@ -166,6 +188,25 @@ cd /home/pi-star/MMDVM-Push-Notifier && sudo bash diagnose.sh
 * 确认 `php -v` 正常；访问 `http://<ip>/admin/push_admin.php`
 * 若提示保存失败：系统处于只读模式，先 `rpi-rw` 或使用面板按钮（会自动申请读写）
 * 导航链接未出现属于正常现象（新版 Pi-Star 的 `admin/index.php` 结构变化时会跳过注入），直接访问上面的地址即可
+
+### 面板显示「最近推送失败 N 次」
+服务每次投递失败都会在运行日志里写一行 `PUSH_FAILED`，面板统计的是最近 64 KB 日志里的失败条数。
+```bash
+grep -a PUSH_FAILED /var/log/pi-star/mmdvm_push.log | tail -5
+```
+常见原因：Token 失效、Chat ID 填的是用户名而不是数字 ID、飞书机器人被移出群。失败后去重记录会被释放，同一通联的后续日志行还会再试一次。
+
+### 日志里出现 TLS / certificate 相关错误
+服务只对**证书校验错误**做降级，并且对「凭据在 URL 里」的渠道（Telegram、飞书）**禁止降级**，所以这类错误会直接失败而不是悄悄降级。
+
+```bash
+sudo apt install --reinstall ca-certificates    # 修复 CA 证书库后重启服务
+sudo systemctl restart mmdvm_push
+```
+需要说明的是：这是有意的取舍 —— 与其在不校验证书的连接上把 bot token 送出去，不如明确失败并告诉你来修证书。
+
+### 温度在阈值附近反复推送
+v3.6.1 起高温告警带迟滞：越过阈值只报一次，回落到「阈值 − `temp_hysteresis`（默认 3.0）」以下才重新触发。可在 `/etc/mmdvm_push.json` 里调 `temp_hysteresis`。
 
 ### 更新后仍无推送
 ```bash
@@ -212,6 +253,8 @@ sudo bash uninstall.sh
 * ThreadPool + semaphore controlled concurrency
 * Hot-reload configuration design
 * 日志轮转/截断/inode 变化检测，跨天自动切换
+* 去重按 `(呼号, 目标)` 记录，A-B-A 交替不会再重复推送；投递失败会释放该记录
+* 推送队列有上限（`PUSH_MAX_QUEUE=64`）＋ 单渠道总耗时预算（`PUSH_TIME_BUDGET=25s`），网络长时间中断只丢新通知，不拖垮进程
 * 只读根文件系统友好：运行期只读配置，写入失败自动降级到 `/tmp`
 * Deep integration with Pi-Star filesystem and permission model
 

@@ -2,7 +2,7 @@ import unittest
 import time
 from datetime import datetime, timedelta
 
-from filters import quiet_time, should_push
+from filters import quiet_time, should_push, forget_pushed
 
 
 def hhmm(dt):
@@ -51,6 +51,43 @@ class TestFilters(unittest.TestCase):
         last = {'call': 'BA4SMQ', 'target': 'TG 46004', 'ts': time.time()}
         self.assertFalse(should_push(conf, event1, last))
         self.assertTrue(should_push(conf, event2, last))
+
+
+class TestSeenDedup(unittest.TestCase):
+    """Per-(call,target) dedup replaced the single-entry comparison | 去重表取代单条比较"""
+
+    conf = {'focus_list': '', 'ignore_list': '', 'my_callsign': 'MYCALL',
+            'min_duration': 1, 'dedup_window': 30}
+
+    def test_alternating_calls_are_deduped(self):
+        seen = {}
+        a = {'call': 'BA4SMQ', 'target': 'TG 1', 'dur': 5}
+        b = {'call': 'BG5ABC', 'target': 'TG 1', 'dur': 5}
+        self.assertTrue(should_push(self.conf, a, {}, seen))
+        self.assertTrue(should_push(self.conf, b, {}, seen))
+        # A-B-A: the third one must be suppressed even though last was B
+        self.assertFalse(should_push(self.conf, a, {}, seen))
+
+    def test_window_expiry_allows_repush(self):
+        seen = {('BA4SMQ', 'TG 1'): time.time() - 120}
+        event = {'call': 'BA4SMQ', 'target': 'TG 1', 'dur': 5}
+        self.assertTrue(should_push(self.conf, event, {}, seen))
+
+    def test_forget_pushed_allows_retry(self):
+        seen = {}
+        event = {'call': 'BA4SMQ', 'target': 'TG 1', 'dur': 5}
+        self.assertTrue(should_push(self.conf, event, {}, seen))
+        self.assertFalse(should_push(self.conf, event, {}, seen))
+        forget_pushed(seen, event)
+        self.assertTrue(should_push(self.conf, event, {}, seen))
+
+    def test_store_stays_bounded(self):
+        seen = {}
+        for i in range(600):
+            seen[('CALL%03d' % i, 'TG 1')] = time.time() - 600
+        event = {'call': 'BA4SMQ', 'target': 'TG 1', 'dur': 5}
+        should_push(self.conf, event, {}, seen)
+        self.assertLess(len(seen), 600)
 
 
 if __name__ == '__main__':

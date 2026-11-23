@@ -138,7 +138,6 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
         mtime = 0
 
     # Clear cache if file was modified | 如果文件被修改则清除缓存
-    global _last_known_mtime
     if id_file in _last_known_mtime and _last_known_mtime[id_file] != mtime:
         old_size = _lookup_cached.cache_info().currsize
         _lookup_cached.cache_clear()
@@ -147,7 +146,9 @@ def _lookup(id_file: str, callsign: str) -> Dict[str, str]:
         )
     _last_known_mtime[id_file] = mtime
 
-    return _lookup_cached(id_file, callsign, mtime)
+    # Return a copy: the LRU keeps one shared dict per key, callers must not
+    # mutate cached state. 返回副本，调用方不能改到缓存里的共享字典。
+    return dict(_lookup_cached(id_file, callsign, mtime))
 
 @lru_cache(maxsize=4096)
 def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
@@ -181,15 +182,24 @@ def _lookup_cached(id_file: str, callsign: str, mtime: float) -> Dict[str, str]:
             with open(id_file, "rb") as f:
                 with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                     query = f",{callsign},".encode("utf-8")
+                    # The callsign is field #1, so the match must sit exactly at the
+                    # first comma of a line. A bare find() would also hit a name or
+                    # city that happens to contain ",CALL,".
+                    # 呼号是第 2 个字段，匹配点必须正好是该行第一个逗号；否则
+                    # 姓名/城市里出现的同串会误命中。
                     idx = mm.find(query)
-                    if idx == -1:
-                        return default_result
-
-                    start = mm.rfind(b"\n", 0, idx) + 1
-                    end = mm.find(b"\n", idx)
-                    if end == -1:
-                        end = len(mm)
-                    line_bytes = mm[start:end]
+                    line_bytes = None
+                    while idx != -1:
+                        start = mm.rfind(b"\n", 0, idx) + 1
+                        if mm.find(b",", start, idx) == -1:
+                            end = mm.find(b"\n", idx)
+                            if end == -1:
+                                end = len(mm)
+                            line_bytes = mm[start:end]
+                            break
+                        idx = mm.find(query, idx + 1)
+                    if line_bytes is None:
+                        return dict(default_result)
 
                     try:
                         line = line_bytes.decode("utf-8")

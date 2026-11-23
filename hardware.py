@@ -53,6 +53,7 @@ class Hardware:
                 ["top", "-bn1"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )
@@ -228,6 +229,7 @@ class Hardware:
                 ["hostname", "-I"],
                 capture_output=True,
                 text=True,
+                errors="replace",
                 timeout=SUBPROCESS_TIMEOUT,
                 check=False
             )

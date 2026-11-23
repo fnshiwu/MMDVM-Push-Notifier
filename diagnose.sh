@@ -152,7 +152,9 @@ echo ""
 echo "[7] 推送测试"
 hr
 if [ -f "$INSTALL_DIR/mmdvm_push.py" ]; then
-    sudo python3 "$INSTALL_DIR/mmdvm_push.py" --test 2>&1 | tail -5
+    # Run as the service user: root would succeed even when the daemon's own
+    # permissions/network are broken. 以服务用户运行，root 成功不代表守护进程能成功。
+    sudo -u mmdvm-push python3 "$INSTALL_DIR/mmdvm_push.py" --test 2>&1 | tail -5
 else
     err "未找到 mmdvm_push.py"
 fi
@@ -161,7 +163,19 @@ echo ""
 # 8
 echo "[8] 健康状态 (JSON)"
 hr
-sudo python3 "$INSTALL_DIR/mmdvm_push.py" --health 2>&1 | tail -3
+sudo -u mmdvm-push python3 "$INSTALL_DIR/mmdvm_push.py" --health 2>&1 | tail -3
+if [ -f "$APP_LOG" ]; then
+    # grep -c prints 0 and exits 1 when nothing matches; `|| echo 0` would
+    # append a second 0 and break the numeric test below.
+    FAILS=$(grep -ac "PUSH_FAILED" "$APP_LOG" 2>/dev/null)
+    FAILS=${FAILS:-0}
+    if [ "$FAILS" -gt 0 ]; then
+        warn "日志中已有 $FAILS 次推送失败（grep PUSH_FAILED $APP_LOG）"
+        grep -a "PUSH_FAILED" "$APP_LOG" 2>/dev/null | tail -3
+    else
+        ok "日志中未发现推送失败"
+    fi
+fi
 echo ""
 
 # 9
@@ -185,6 +199,21 @@ for f in /etc/sudoers.d/mmdvm-push-web /etc/sudoers.d/pistar-dashboard; do
         warn "$f 不存在"
     fi
 done
+
+# The web panel collects health data as mmdvm-push; without this rule it silently
+# falls back to the www-data perspective and shows false alarms.
+# 面板以 mmdvm-push 身份取健康数据；缺这条规则会静默退回 www-data 视角并显示假告警。
+# Do NOT nest sudo here: the sudoers policy grants www-data the python3 rule,
+# not permission to invoke /usr/bin/sudo itself. The nested check would fail
+# even when the panel works. Inspect the effective rule file instead.
+# 不要嵌套 sudo：sudoers 只授权 www-data 运行 python3，并未授权运行 sudo 本身，
+# 嵌套检查会对着正确配置误报失败。直接检查生效的规则文件。
+if grep -qF "(mmdvm-push) NOPASSWD: /usr/bin/python3 $INSTALL_DIR/mmdvm_push.py --health" \
+        /etc/sudoers.d/mmdvm-push-web /etc/sudoers 2>/dev/null; then
+    ok "Web 面板可以服务用户身份采集健康数据"
+else
+    warn "Web 面板无法以 mmdvm-push 运行 --health（将退回 www-data 视角，建议重跑 update.sh）"
+fi
 
 echo ""
 echo "=========================================="

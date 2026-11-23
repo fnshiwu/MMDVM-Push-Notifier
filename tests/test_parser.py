@@ -91,6 +91,33 @@ class TestParserPiStar43(unittest.TestCase):
         line = "end of voice transmission from BA4SMQ to TG 1, 99999.0 seconds"
         self.assertIsNone(parser.parse_line(line))
 
+    def test_missing_ber_falls_back_to_zero(self):
+        """No BER field must yield a string, never None | 无 BER 字段必须兜底为字符串"""
+        line = ("end of voice transmission from BA4SMQ to TG 46001, "
+                "3.4 seconds, 0% packet loss")
+        e = parser.parse_line(line)
+        self.assertIsNotNone(e)
+        self.assertEqual(e['ber'], "0.0")
+        self.assertIsInstance(e['ber'], str)
+
+    def test_missing_loss_and_ber(self):
+        e = parser.parse_line("end of data transmission from N0CALL to PRIVATE 12, 2 seconds")
+        self.assertIsNotNone(e)
+        self.assertEqual(e['loss'], "0")
+        self.assertEqual(e['ber'], "0.0")
+        self.assertEqual(e['rssi'], "")
+
+    def test_ber_keeps_original_precision(self):
+        e = parser.parse_line(
+            "end of voice transmission from BA4SMQ to TG 1, 3.0 seconds, BER: 1.50%")
+        self.assertEqual(e['ber'], "1.5")
+
+    def test_rssi_float_is_truncated(self):
+        e = parser.parse_line(
+            "DMR Slot 1, received RF end of voice transmission from BA4SMQ to TG 1, "
+            "3.0 seconds, BER: 0.0%, RSSI: -45.6 dBm")
+        self.assertEqual(e['rssi'], "-45")
+
 
 if __name__ == '__main__':
     unittest.main()
