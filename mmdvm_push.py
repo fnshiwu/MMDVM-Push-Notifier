@@ -19,11 +19,12 @@ import logging
 import atexit
 import tempfile
 import platform
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any, List
 
 from parser import parse_line
-from filters import quiet_time, should_push
+from filters import quiet_time, should_push, forget_pushed
 from notify_fmt import format_message, format_boot_notice, format_test_push
 from identity import Identity
 from hardware import Hardware
@@ -34,7 +35,7 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.6.0"
+VERSION = "v3.6.2"
 CONFIG_FILE = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 
@@ -45,10 +46,11 @@ LOG_GLOBS = ("MMDVM-*.log", "MMDVM*.log", "mmdvmhost*.log", "mmdvm*.log")
 
 MEMORY_CHECK_INTERVAL = 3600   # Seconds between self memory audits
 MEMORY_THRESHOLD_KB = 96 * 1024  # Warn above 96 MB RSS
+LOG_CHECK_INTERVAL = 5         # Seconds between rotation/truncation checks
 MAX_LOG_ITERATIONS = 200000    # Max read loop iterations before reopening
 STALE_LOG_WARN = 900           # Warn if the MMDVM log has not been written for 15 min
-BOOT_NOTICE_ATTEMPTS = 10
-BOOT_NOTICE_INTERVAL = 8
+BOOT_NOTICE_ATTEMPTS = 5
+BOOT_NOTICE_INTERVAL = 6
 
 RUNNING = True
 
@@ -175,6 +177,10 @@ def _usable(path: str) -> bool:
 class MMDVMMonitor:
     def __init__(self):
         self.last_msg: Dict[str, Any] = {"call": "", "target": "", "ts": 0}
+        # Per-(call, target) dedup timestamps, so A-B-A alternation is handled
+        # 按 (呼号, 目标) 记录去重时间，A-B-A 交替不会再重复推送
+        self._seen: Dict[Any, float] = {}
+        self._dedup_lock = threading.Lock()
         self.hw = Hardware()
         self.alerts = AlertManager(self.hw)
         self.identity = Identity(LOCAL_ID_FILE)
@@ -342,6 +348,7 @@ class MMDVMMonitor:
                 current_log = self.get_latest_log(conf)
                 if not current_log:
                     self._warn_no_log(conf)
+                    self._maybe_temp_alert(conf)
                     time.sleep(5)
                     continue
 
@@ -370,6 +377,30 @@ class MMDVMMonitor:
             logger.warning("No readable MMDVM-*.log in %s. "
                            "If MMDVMHost is running, check: ls -l %s", directory, directory)
 
+    def _maybe_temp_alert(self, conf: Dict):
+        """Send the temperature alert when its interval elapsed | 到点则检查并推送温度告警
+
+        Shared by the tail loop and the "no log file" branch of run(), so a hotspot
+        without an MMDVM log still gets overheating alerts.
+        日志循环与「没有日志文件」分支共用，没有 MMDVM 日志时也能收到高温告警。
+        """
+        try:
+            interval = float(conf.get('temp_interval', 1800))  # Already in seconds
+        except (TypeError, ValueError):
+            interval = 1800
+        now_ts = time.time()
+        if now_ts - self._last_temp_check <= interval:
+            return
+        try:
+            alert_res = self.alerts.check_temp_alert(conf)
+            if alert_res:
+                title, body = alert_res
+                PushService.send(conf, title, body, is_voice=False)
+                logger.info("Temperature alert pushed")
+        except Exception as e:
+            logger.error("Temperature alert error: %s", e)
+        self._last_temp_check = now_ts
+
     def _tail_log(self, log_file: str):
         iteration_count = 0
         start_time = time.time()
@@ -377,7 +408,12 @@ class MMDVMMonitor:
         try:
             with open(log_file, "r", encoding="utf-8", errors="ignore") as fh:
                 fh.seek(0, 2)
-                inode = os.fstat(fh.fileno()).st_ino
+                st_open = os.fstat(fh.fileno())
+                inode = st_open.st_ino
+                # fh.tell() on a text stream is an opaque cookie, not a byte offset,
+                # so truncation is detected by comparing successive stat() sizes.
+                # 文本流的 tell() 是不透明 cookie，不能与 st_size 比较；改用两次 stat 的尺寸差判断截断。
+                last_size = st_open.st_size
                 last_check = time.time()
 
                 while RUNNING:
@@ -393,21 +429,10 @@ class MMDVMMonitor:
 
                     # Temperature alert is scheduled here (single owner) | 温度告警调度
                     conf = ConfigManager.get_config(CONFIG_FILE)
-                    temp_interval = conf.get('temp_interval', 1800)  # Already in seconds
-                    now_ts = time.time()
-                    if now_ts - self._last_temp_check > temp_interval:
-                        try:
-                            alert_res = self.alerts.check_temp_alert(conf)
-                            if alert_res:
-                                title, body = alert_res
-                                PushService.send(conf, title, body, is_voice=False)
-                                logger.info("Temperature alert pushed")
-                        except Exception as e:
-                            logger.error("Temperature alert error: %s", e)
-                        self._last_temp_check = now_ts
+                    self._maybe_temp_alert(conf)
 
                     # Rotation / truncation / stale detection | 轮转、截断、静默检测
-                    if time.time() - last_check > 5:
+                    if time.time() - last_check > LOG_CHECK_INTERVAL:
                         last_check = time.time()
                         try:
                             st = os.stat(log_file)
@@ -418,16 +443,18 @@ class MMDVMMonitor:
                             logger.info("Log file was replaced (rotation), reopening")
                             return
 
-                        if st.st_size < fh.tell():
-                            # The file was rewritten from offset 0. Reading it from
-                            # the start would replay every historical QSO as a new
-                            # event (dedup only covers a 3s window). Return so the
-                            # main loop reopens the current log and tails from its end.
-                            # 日志被截断重写：从文件头重读会把历史通联当新事件全部推送，
-                            # 直接返回让主循环重新打开文件并从末尾继续跟踪。
-                            logger.info("Log file was truncated, reopening from end "
-                                        "to avoid replaying old entries")
+                        if st.st_size < last_size:
+                            # The file was rewritten from offset 0. Re-reading it
+                            # would replay every historical QSO as a new event
+                            # (dedup only covers a few seconds). Return so the main
+                            # loop reopens the current log and tails from its end.
+                            # 截断重写后从头读会把历史通联当新事件重推；返回让主循环
+                            # 重新打开文件、从末尾继续跟踪。
+                            logger.info("Log file was truncated (%s -> %s bytes), "
+                                        "reopening from end to avoid replaying old entries",
+                                        last_size, st.st_size)
                             return
+                        last_size = st.st_size
 
                         new_log = self.get_latest_log(conf)
                         if new_log and os.path.abspath(new_log) != os.path.abspath(log_file):
@@ -455,6 +482,28 @@ class MMDVMMonitor:
         except Exception as e:
             logger.error("Tail log error: %s", e)
 
+    def _on_push_done(self, future, event: Dict[str, Any]):
+        """Release the dedup entry when delivery failed | 推送失败时释放去重记录"""
+        try:
+            ok = future.result()
+        except Exception as e:
+            logger.debug("Push future failed: %s", e)
+            ok = False
+        if ok:
+            return
+
+        # The tail thread also mutates _seen inside should_push(); this callback
+        # runs on a push worker. Both sides must hold the same lock or pruning
+        # can iterate a dict that is being popped (RuntimeError kills the tail).
+        # tail 线程在 should_push() 中改 _seen，本回调在推送线程执行，必须共用同一把锁。
+        with self._dedup_lock:
+            forget_pushed(self._seen, event)
+            if (self.last_msg.get("call") == event['call'] and
+                    self.last_msg.get("target") == event['target']):
+                self.last_msg = {"call": "", "target": "", "ts": 0}
+        logger.warning("Push failed for %s -> %s, dedup entry released (will retry on next line)",
+                       event['call'], event['target'])
+
     def process_line(self, line: str):
         event = parse_line(line)
         if not event:
@@ -465,13 +514,16 @@ class MMDVMMonitor:
         if quiet_time(conf):
             return
 
-        if not should_push(conf, event, self.last_msg):
+        with self._dedup_lock:
+            should = should_push(conf, event, self.last_msg, self._seen)
+        if not should:
             return
 
         curr_ts = time.time()
-        self.last_msg.update({"call": event['call'],
-                              "target": event['target'],
-                              "ts": curr_ts})
+        with self._dedup_lock:
+            self.last_msg.update({"call": event['call'],
+                                  "target": event['target'],
+                                  "ts": curr_ts})
         self.last_activity_ts = curr_ts
 
         try:
@@ -483,10 +535,23 @@ class MMDVMMonitor:
         temp_str, _ = self.hw.get_current_temp(conf)
         type_label, body = format_message(conf, event, temp_str, info)
 
-        PushService.send(conf, type_label, body, is_voice=event['is_voice'])
-        logger.info("Push queued: %s -> %s (%ss%s)",
-                    event['call'], event['target'], event['dur'],
-                    (", " + event['mode']) if event.get('mode') else "")
+        future = PushService.send(conf, type_label, body, is_voice=event['is_voice'])
+        if future is not None:
+            future.add_done_callback(lambda f, ev=dict(event): self._on_push_done(f, ev))
+            logger.info("Push queued: %s -> %s (%ss%s)",
+                        event['call'], event['target'], event['dur'],
+                        (", " + event['mode']) if event.get('mode') else "")
+        else:
+            # Dropped (queue full / no channel): release the dedup entry so the
+            # next line for this QSO can still be delivered.
+            # 被丢弃（队列满/无可用通道）：释放去重记录，同一通联的下一行仍可补推。
+            with self._dedup_lock:
+                forget_pushed(self._seen, event)
+                if (self.last_msg.get("call") == event['call'] and
+                        self.last_msg.get("target") == event['target']):
+                    self.last_msg = {"call": "", "target": "", "ts": 0}
+            logger.warning("Push not queued for %s -> %s (dropped or no channel)",
+                           event['call'], event['target'])
 
     # ---------- health ----------
     def health(self) -> Dict[str, Any]:
@@ -514,6 +579,8 @@ class MMDVMMonitor:
         except Exception:
             parser_ok = False
 
+        push_fail = _recent_push_failures()
+
         return {
             "version": VERSION,
             "pistar_version": PISTAR_VERSION,
@@ -522,7 +589,13 @@ class MMDVMMonitor:
             "is_bookworm": IS_BOOKWORM,
             "is_trixie": IS_TRIXIE,
             "app_log_dir": APP_LOG_DIR,
-            "app_log_writable": os.access(APP_LOG_DIR, os.W_OK),
+            "app_log_file": os.path.join(APP_LOG_DIR, "mmdvm_push.log"),
+            "app_log_dir_writable": os.access(APP_LOG_DIR, os.W_OK),
+            # Pi-Star keeps /var/log/pi-star root-owned 0755: only the pre-created
+            # file is writable by the service user, so check both.
+            # Pi-Star 的日志目录属 root，只有预创建的文件对服务用户可写，两者都要看。
+            "app_log_writable": (os.access(APP_LOG_DIR, os.W_OK) or
+                                 os.access(os.path.join(APP_LOG_DIR, "mmdvm_push.log"), os.W_OK)),
             "log_dir": log_dir,
             "mmdvm_log_dir": log_dir,
             "mmdvm_log_exists": os.path.isdir(log_dir),
@@ -534,6 +607,8 @@ class MMDVMMonitor:
             "config_exists": os.path.exists(CONFIG_FILE),
             "config_valid": _config_is_valid(),
             "parser_selftest": parser_ok,
+            "push_failures_recent": push_fail["count"],
+            "push_failure_last": push_fail["last"],
             "ip": ip,
             "cpu_system": "%s%%" % cpu_sys,
             "cpu_process": "%s%%" % cpu_proc,
@@ -541,6 +616,26 @@ class MMDVMMonitor:
             "mem_rss_kb": rss_kb,
             "time": datetime.now().isoformat(timespec="seconds"),
         }
+
+
+def _recent_push_failures(tail_bytes: int = 65536):
+    """Count PUSH_FAILED markers in the tail of the app log | 统计日志尾部的推送失败
+
+    The service writes one ``PUSH_FAILED`` line per undelivered notification, so the
+    panel can surface "you missed N pushes" without any IPC.
+    服务每次推送失败都会写一行 PUSH_FAILED，面板据此提示漏推次数，无需 IPC。
+    """
+    path = os.path.join(APP_LOG_DIR, "mmdvm_push.log")
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, 2)
+            size = fh.tell()
+            fh.seek(max(0, size - tail_bytes))
+            data = fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return {"count": 0, "last": ""}
+    lines = [ln for ln in data.splitlines() if "PUSH_FAILED" in ln]
+    return {"count": len(lines), "last": lines[-1].strip()[:200] if lines else ""}
 
 
 def _config_is_valid() -> bool:
@@ -559,7 +654,12 @@ def _current_user() -> str:
         import pwd
         return pwd.getpwuid(os.getuid()).pw_name
     except Exception:
-        return os.environ.get("USER", "unknown")
+        pass
+    try:
+        import getpass
+        return getpass.getuser()
+    except Exception:
+        return os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
 
 
 # =========================

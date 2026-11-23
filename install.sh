@@ -47,8 +47,8 @@ done
 mount -o remount,size=32M /run 2>/dev/null
 
 # Restore read-only root on EVERY exit path (including early failures such as
-# a missing file or a Python syntax error), not only on the success path at the
-# end. 任何退出路径（含中途失败）都恢复只读根分区，避免把 Pi-Star 留在 rw 状态。
+# a missing file or a Python syntax error), not only on the success path.
+# 任何退出路径都恢复只读根分区（含中途失败），避免把 Pi-Star 留在 rw 状态。
 restore_root_ro() {
     trap - EXIT
     for cmd_path in /usr/local/sbin/rpi-ro /usr/local/bin/rpi-ro /usr/bin/rpi-ro; do
@@ -86,15 +86,21 @@ if ! id -u mmdvm-push >/dev/null 2>&1; then
 fi
 
 # The service user MUST be able to read /var/log/pi-star | 必须能读日志目录
-for grp in www-data pi-star adm; do
+# www-data is deliberately NOT added: the daemon never needs the web server's group,
+# and granting it would contradict the "least privilege" claim of this script.
+# 故意不加 www-data：守护进程不需要 Web 服务器的组，加了与“最小权限”自相矛盾。
+for grp in pi-star adm; do
     if getent group "$grp" >/dev/null 2>&1; then
-        usermod -a -G "$grp" mmdvm-push
-        ok "服务用户已加入 $grp 组"
+        if usermod -a -G "$grp" mmdvm-push; then
+            ok "服务用户已加入 $grp 组"
+        else
+            warn "加入 $grp 组失败（可能导致读不到日志）"
+        fi
     fi
 done
 
-chown -R mmdvm-push:mmdvm-push "$INSTALL_DIR"
-chmod -R 755 "$INSTALL_DIR"
+chown -R mmdvm-push:mmdvm-push "$INSTALL_DIR" || warn "安装目录属主修正失败"
+chmod -R 755 "$INSTALL_DIR" || warn "安装目录权限修正失败"
 
 # =========================
 # 3) Required files | 必要文件检查
@@ -196,39 +202,88 @@ chown www-data:www-data "$INSTALL_DIR/push_admin.php" 2>/dev/null
 chmod 644 "$INSTALL_DIR/push_admin.php"
 
 # Add a menu entry without breaking the dashboard | 谨慎注入导航链接
-ADMIN_INDEX="/var/www/dashboard/admin/index.php"
-if [ -f "$ADMIN_INDEX" ]; then
-    cp "$ADMIN_INDEX" "$ADMIN_INDEX.bak_pushnav" 2>/dev/null
-    python3 - "$ADMIN_INDEX" <<'PY'
+# Pi-Star 4.3.x: admin/index.php may be a 12-byte `../index.php` stub, while the
+# real menu lives in the dashboard root index.php. Different builds put the menu
+# in different files, so handle every candidate. Never insert an `echo` into a
+# PHP comment block: a docblock line mentioning configure.php looks like a valid
+# anchor but the generated link would never be rendered.
+# Pi-Star 4.3.x：真正的菜单可能在任一候选文件中；必须跳过 PHP 注释里的伪锚点，
+# 否则注入的 echo 永远不执行，页面上依然看不到按钮。
+ADMIN_INDEXES=""
+for candidate in /var/www/dashboard/index.php /var/www/html/index.php /var/www/index.php /var/www/dashboard/admin/index.php; do
+    [ -f "$candidate" ] && ADMIN_INDEXES="$ADMIN_INDEXES $candidate"
+done
+if [ -n "$ADMIN_INDEXES" ]; then
+    for idx in $ADMIN_INDEXES; do
+        cp "$idx" "$idx.bak_pushnav" 2>/dev/null
+    done
+    python3 - $ADMIN_INDEXES <<'PY'
 import io, re, sys
-path = sys.argv[1]
-try:
-    with io.open(path, "r", encoding="utf-8", errors="ignore") as fh:
-        lines = fh.readlines()
-except OSError:
-    sys.exit(0)
-if any("push_admin.php" in ln for ln in lines):
-    print("  (导航链接已存在，跳过)")
-    sys.exit(0)
-pattern = re.compile(r'^\s*(echo\s|print\s)')
-anchor = None
-for i, ln in enumerate(lines):
-    if pattern.match(ln) and re.search(r'href=\\?["\'](update|power|config)\.php', ln):
-        anchor = i
-        break
-if anchor is None:
-    print("  (未找到可注入位置，请手动添加导航链接)")
-    sys.exit(0)
-lines.insert(anchor + 1, 'echo \' <a href="/admin/push_admin.php" style="color: #ffffff;">\u63a8\u9001\u8bbe\u7f6e</a> |\'."\\n";\n')
-try:
-    with io.open(path, "w", encoding="utf-8") as fh:
-        fh.writelines(lines)
-    print("  (导航链接已注入)")
-except OSError as exc:
-    print("  (写入失败: %s)" % exc)
+
+LINK = '<a href="/admin/push_admin.php" style="color: #ffffff;">\u63a8\u9001\u8bbe\u7f6e</a> | '
+ANCHOR = re.compile(r'<a\s+href=["\']/admin/(?:update|power|configure)\.php["\']')
+
+
+def in_php_comment(text, pos):
+    """Whether pos is inside a //, # or /* */ comment (not string-aware)."""
+    state, i, size = 0, 0, len(text)
+    while i < pos:
+        ch = text[i]
+        nxt = text[i + 1] if i + 1 < size else ''
+        if state == 0:
+            if ch == '/' and nxt == '*':
+                state, i = 2, i + 1
+            elif ch == '/' and nxt == '/':
+                state, i = 1, i + 1
+            elif ch == '#':
+                state = 1
+        elif state == 1:
+            if ch == '\n':
+                state = 0
+        elif state == 2:
+            if ch == '*' and nxt == '/':
+                state, i = 0, i + 1
+        i += 1
+    return state != 0
+
+
+for path in sys.argv[1:]:
+    try:
+        src = io.open(path, encoding='utf-8', errors='ignore').read()
+    except OSError:
+        continue
+    original = src
+    # Undo an older injection that landed inside a docblock as a bare `echo`.
+    src = ''.join(line for line in src.splitlines(True)
+                  if not (line.lstrip().startswith('echo ') and 'push_admin.php' in line))
+    src = src.replace(LINK, '')
+    pos = next((m.start() for m in ANCHOR.finditer(src)
+                if not in_php_comment(src, m.start())), None)
+    if pos is None:
+        continue
+    line_start = src.rfind('\n', 0, pos) + 1
+    line_end = src.find('\n', pos)
+    anchor_line = src[line_start: line_end if line_end >= 0 else len(src)]
+    if re.match(r'\s*(echo|print)\b', anchor_line):
+        indent = re.match(r'\s*', anchor_line).group(0)
+        insert = indent + 'echo \' <a href="/admin/push_admin.php" style="color: #ffffff;">\u63a8\u9001\u8bbe\u7f6e</a> |\'."\\n";\n'
+    else:
+        insert = LINK
+    src = src[:pos] + insert + src[pos:]
+    if src == original:
+        continue
+    try:
+        io.open(path, 'w', encoding='utf-8').write(src)
+        print('  (导航链接已注入 %s)' % path)
+    except OSError as exc:
+        print('  (写入失败 %s: %s)' % (path, exc))
 PY
-    chown www-data:www-data "$ADMIN_INDEX" 2>/dev/null
-    chmod 664 "$ADMIN_INDEX" 2>/dev/null
+    for idx in $ADMIN_INDEXES; do
+        chown www-data:www-data "$idx" 2>/dev/null
+        chmod 664 "$idx" 2>/dev/null
+    done
+else
+    warn "未找到可注入导航的 index.php，请手动添加链接"
 fi
 
 # =========================
@@ -236,14 +291,18 @@ fi
 # =========================
 echo "8. 配置 Web 端 sudoers..."
 SUDO_D="/etc/sudoers.d/mmdvm-push-web"
+# The python3 rules are scoped to (mmdvm-push) + an explicit argument: the panel can
+# ask the service account for its own view, without a blanket "run as root" right.
+# python3 规则限定为以服务用户身份、且必须带明确参数，避免 Web 端拿到 root 执行权。
 cat > "$SUDO_D" <<EOF
 # MMDVM-Push-Notifier - web admin privileges (Pi-Star 4.2.x - 4.3.x)
-www-data ALL=(ALL) NOPASSWD: /bin/systemctl start mmdvm_push.service, /bin/systemctl stop mmdvm_push.service, /bin/systemctl restart mmdvm_push.service, /bin/systemctl status mmdvm_push.service, /bin/systemctl is-active mmdvm_push.service, /bin/systemctl is-enabled mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service, /usr/bin/systemctl stop mmdvm_push.service, /usr/bin/systemctl restart mmdvm_push.service, /usr/bin/systemctl status mmdvm_push.service, /usr/bin/systemctl is-active mmdvm_push.service, /usr/bin/systemctl is-enabled mmdvm_push.service
-www-data ALL=(ALL) NOPASSWD: /usr/local/sbin/rpi-rw, /usr/local/sbin/rpi-ro, /usr/local/bin/rpi-rw, /usr/local/bin/rpi-ro, /usr/bin/rpi-rw, /usr/bin/rpi-ro
-www-data ALL=(ALL) NOPASSWD: /bin/mount -o remount,rw /, /bin/mount -o remount,ro /
-www-data ALL=(ALL) NOPASSWD: /usr/bin/python3 $INSTALL_DIR/mmdvm_push.py
-www-data ALL=(ALL) NOPASSWD: $INSTALL_DIR/update.sh
+www-data ALL=(root) NOPASSWD: /bin/systemctl start mmdvm_push.service, /bin/systemctl stop mmdvm_push.service, /bin/systemctl restart mmdvm_push.service, /bin/systemctl status mmdvm_push.service, /bin/systemctl is-active mmdvm_push.service, /bin/systemctl is-enabled mmdvm_push.service
+www-data ALL=(root) NOPASSWD: /usr/bin/systemctl start mmdvm_push.service, /usr/bin/systemctl stop mmdvm_push.service, /usr/bin/systemctl restart mmdvm_push.service, /usr/bin/systemctl status mmdvm_push.service, /usr/bin/systemctl is-active mmdvm_push.service, /usr/bin/systemctl is-enabled mmdvm_push.service
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/rpi-rw, /usr/local/sbin/rpi-ro, /usr/local/bin/rpi-rw, /usr/local/bin/rpi-ro, /usr/bin/rpi-rw, /usr/bin/rpi-ro
+www-data ALL=(root) NOPASSWD: /bin/mount -o remount\,rw /, /bin/mount -o remount\,ro /, /usr/bin/mount -o remount\,rw /, /usr/bin/mount -o remount\,ro /
+www-data ALL=(mmdvm-push) NOPASSWD: /usr/bin/python3 $INSTALL_DIR/mmdvm_push.py --health
+www-data ALL=(mmdvm-push) NOPASSWD: /usr/bin/python3 $INSTALL_DIR/mmdvm_push.py --test
+www-data ALL=(root) NOPASSWD: $INSTALL_DIR/update.sh
 EOF
 chmod 440 "$SUDO_D"
 if visudo -cf "$SUDO_D" >/dev/null 2>&1; then
@@ -257,8 +316,11 @@ fi
 # 9) systemd | 服务安装
 # =========================
 echo "9. 安装 systemd 服务..."
-install -m 644 "$INSTALL_DIR/mmdvm_push.service" /etc/systemd/system/mmdvm_push.service
-systemctl daemon-reload
+if ! install -m 644 "$INSTALL_DIR/mmdvm_push.service" /etc/systemd/system/mmdvm_push.service; then
+    err "systemd 单元安装失败"
+    exit 1
+fi
+systemctl daemon-reload || warn "daemon-reload 失败"
 systemctl enable mmdvm_push.service >/dev/null 2>&1
 systemctl restart mmdvm_push.service
 sleep 2
