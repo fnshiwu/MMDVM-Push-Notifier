@@ -118,6 +118,52 @@ class TestMenuInjection(unittest.TestCase):
             )
             self.assertNotIn('echo \' <a href="/admin/push_admin.php">old', patched)
 
+    def test_echo_anchor_does_not_splice_statement_into_string(self):
+        # The most common menu style is a single PHP echo containing several
+        # links. If the injected echo lands at the anchor COLUMN instead of the
+        # line start, it is spliced inside the string literal and produces a
+        # PHP parse error -> HTTP 500 for the whole dashboard.
+        import subprocess
+        import sys
+        import tempfile
+
+        body = (ROOT / "install.sh").read_text(encoding="utf-8")
+        block = body.split("python3 - $ADMIN_INDEXES <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            page = Path(tmp) / "index.php"
+            page.write_text(
+                '<?php\n'
+                'echo \' <a href="/admin/update.php">Update</a> | '
+                '<a href="/admin/configure.php">Config</a>\'."\\n";\n',
+                encoding="utf-8",
+            )
+            proc = subprocess.run(
+                [sys.executable, "-", str(page)],
+                input=block, text=True, capture_output=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            patched = page.read_text(encoding="utf-8")
+            # Our echo must be a standalone line, not embedded mid-string.
+            self.assertIn(
+                'echo \' <a href="/admin/push_admin.php" style="color: #ffffff;">推送设置</a> |\'."\\n";',
+                patched,
+            )
+            self.assertIn('<a href="/admin/configure.php">Config</a>\'."\\n";', patched)
+            self.assertNotIn('echo \' echo \'', patched)
+
+
+class TestUninstallCleanup(unittest.TestCase):
+    def test_backup_restored_before_deletion(self):
+        body = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
+        restore = body.index('sudo cp -f "$idx.bak_pushnav" "$idx"')
+        delete = body.index('sudo find /var/www -type f -name "*.bak_pushnav" -delete')
+        self.assertLess(restore, delete, "backups deleted before they are restored")
+
+    def test_uninstall_cleans_all_index_candidates(self):
+        body = (ROOT / "uninstall.sh").read_text(encoding="utf-8")
+        for path in ("/var/www/dashboard/index.php", "/var/www/dashboard/admin/index.php"):
+            self.assertIn(path, body)
+
 
 if __name__ == "__main__":
     unittest.main()

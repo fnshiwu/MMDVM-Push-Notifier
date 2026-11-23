@@ -48,18 +48,38 @@ if [ -L "$ADMIN_LINK" ] || [ -f "$ADMIN_LINK" ]; then
     echo "   - Removed $ADMIN_LINK"
 fi
 
-# Revert nav injection (restore backups or remove inserted block) | 还原导航注入（恢复备份或移除插入块）
-sudo find /var/www -type f -name "*.bak_pushnav" -delete 2>/dev/null
-ADMIN_INDEX="/var/www/dashboard/admin/index.php"
-if [ -f "$ADMIN_INDEX.bak_pushnav" ]; then
-    sudo mv -f "$ADMIN_INDEX.bak_pushnav" "$ADMIN_INDEX"
-else
-    if [ -f "$ADMIN_INDEX" ]; then
-        sudo sed -i '/推送设置/d' "$ADMIN_INDEX" 2>/dev/null || true
+# Revert nav injection | 还原导航注入
+# Restore from the backup BEFORE deleting backups (the old order deleted the
+# backup then tried to move it, so restoration never happened). Handle every
+# candidate index.php, not just the admin stub — the real menu is in the root.
+# 先恢复备份再清理备份（旧顺序先删后恢复，永远失败）。
+# 处理所有候选 index.php，真正的菜单在根目录而非 admin 桩文件。
+for idx in /var/www/dashboard/index.php /var/www/html/index.php /var/www/index.php /var/www/dashboard/admin/index.php; do
+    [ -f "$idx" ] || continue
+    if [ -f "$idx.bak_pushnav" ]; then
+        sudo cp -f "$idx.bak_pushnav" "$idx" 2>/dev/null || true
+    elif [ -f "$idx" ]; then
+        # No backup: remove only our injected lines, never a whole HTML block.
+        # 无备份：只删我们注入的行，不整块删除 HTML。
+        sudo python3 - "$idx" <<'PY' 2>/dev/null || true
+import io, sys
+path = sys.argv[1]
+link = '<a href="/admin/push_admin.php" style="color: #ffffff;">\u63a8\u9001\u8bbe\u7f6e</a> | '
+try:
+    src = io.open(path, encoding='utf-8', errors='ignore').read()
+except OSError:
+    sys.exit(0)
+src = ''.join(l for l in src.splitlines(True)
+              if not (l.lstrip().startswith('echo ') and 'push_admin.php' in l))
+src = src.replace(link, '')
+io.open(path, 'w', encoding='utf-8').write(src)
+PY
     fi
-fi
-sudo chown www-data:www-data "$ADMIN_INDEX" 2>/dev/null || true
-sudo chmod 644 "$ADMIN_INDEX" 2>/dev/null || true
+    sudo chown www-data:www-data "$idx" 2>/dev/null || true
+    sudo chmod 644 "$idx" 2>/dev/null || true
+done
+# Remove backups only after every candidate has been processed | 全部处理后再删备份
+sudo find /var/www -type f -name "*.bak_pushnav" -delete 2>/dev/null
 
 # 4) Remove config (optional) | 删除配置（可选）
 read -p "Remove configuration file? (y/n) / 删除配置文件吗？(y/n): " del_conf

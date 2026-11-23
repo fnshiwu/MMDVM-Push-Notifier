@@ -265,11 +265,15 @@ for path in sys.argv[1:]:
     line_end = src.find('\n', pos)
     anchor_line = src[line_start: line_end if line_end >= 0 else len(src)]
     if re.match(r'\s*(echo|print)\b', anchor_line):
+        # The anchor sits inside a PHP echo/print statement. A whole new echo
+        # must go at the START of that line as its own statement. Splicing it
+        # at `pos` lands inside the existing string literal, which is a parse
+        # error and turns the entire dashboard into HTTP 500.
         indent = re.match(r'\s*', anchor_line).group(0)
         insert = indent + 'echo \' <a href="/admin/push_admin.php" style="color: #ffffff;">\u63a8\u9001\u8bbe\u7f6e</a> |\'."\\n";\n'
+        src = src[:line_start] + insert + src[line_start:]
     else:
-        insert = LINK
-    src = src[:pos] + insert + src[pos:]
+        src = src[:pos] + LINK + src[pos:]
     if src == original:
         continue
     try:

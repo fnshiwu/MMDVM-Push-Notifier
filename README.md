@@ -13,6 +13,12 @@
 Designed for long-term, unattended operation on Pi-Star systems. Validated on **Pi-Star 4.3.7 (Debian 12 Bookworm)** and still compatible with **Pi-Star 4.2.x (Bullseye)**.  
 本项目面向 Pi-Star 的长期稳定运行场景设计，已在 Pi-Star 4.3.7（Debian 12 Bookworm）实机验证，并向下兼容 4.2.x。
 
+> **v3.6.3 更新重点（安装/卸载修复版）**
+> * 修复卸载后重新安装时 `/admin/` 返回 HTTP 500：安装脚本不再把 `echo` 插进另一条 `echo` 的字符串中间，改为在行首插入独立语句；卸载脚本先恢复备份再删除，并遍历所有候选 `index.php`
+> * 修复 PHP 语法被注释锚点破坏的问题，`php -l` 校验纳入恢复流程
+> * 新增 `recover_dashboard.py`：一条命令修复已被破坏的面板、恢复「推送设置」入口
+> * 测试从 83 项增加到 86 项
+>
 > **v3.6.2 更新重点（Open Code Review 审计修复版）**
 > * 修复 `NaN` / `Inf` 配置值绕过校验：单个非有限数值不再中断后续所有字段的清洗
 > * 修复去重表跨线程并发访问：`tail` 线程与推送线程共用同一把锁，繁忙中继下不会因 `dictionary changed size during iteration` 停掉日志监听

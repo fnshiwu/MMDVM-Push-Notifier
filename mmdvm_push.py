@@ -35,7 +35,7 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.6.2"
+VERSION = "v3.6.3"
 CONFIG_FILE = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 
