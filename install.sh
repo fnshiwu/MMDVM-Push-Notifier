@@ -317,6 +317,39 @@ else
 fi
 
 # =========================
+# 8.5) Time synchronisation | 系统时间同步
+# =========================
+# Signed webhooks (Feishu) reject a timestamp more than one hour away from the
+# server clock. Pi-Star has no RTC, so without NTP a cold boot starts with a
+# stale date and startup pushes fail with code 19021.
+# 签名型 Webhook（飞书）会拒绝与服务器时间差超过一小时的时间戳。Pi-Star 无 RTC，
+# 不开 NTP 时冷启动日期是旧的，启动推送会以 19021 失败。
+echo "8.5. 配置系统时间同步（NTP）..."
+if command -v timedatectl >/dev/null 2>&1; then
+    if timedatectl set-ntp true 2>/dev/null; then
+        ok "已启用 systemd 时间同步（timedatectl set-ntp true）"
+    else
+        warn "timedatectl set-ntp true 失败，尝试直接启用 systemd-timesyncd"
+    fi
+fi
+if [ -d /run/systemd/system ]; then
+    # systemd-timesyncd is a static unit: enable + start is safe and idempotent.
+    # 静态单元，enable + start 幂等，可重复执行。
+    if systemctl enable --now systemd-timesyncd.service >/dev/null 2>&1; then
+        ok "systemd-timesyncd 已启用并启动"
+    else
+        warn "systemd-timesyncd 未能启动（系统可能使用 chrony/ntpsec，或该机未装时间同步服务）"
+    fi
+fi
+if command -v timedatectl >/dev/null 2>&1; then
+    SYNC_STATE=$(timedatectl show -p SystemClockSynchronized --value 2>/dev/null || echo "unknown")
+    case "$SYNC_STATE" in
+        yes) ok "系统时钟已同步" ;;
+        *)   warn "系统时钟尚未同步（通常是刚启动、NTP 仍在校正）；服务会等待约 60 秒并用服务器时间重签" ;;
+    esac
+fi
+
+# =========================
 # 9) systemd | 服务安装
 # =========================
 echo "9. 安装 systemd 服务..."

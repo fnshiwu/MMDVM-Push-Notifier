@@ -2,7 +2,7 @@
 Description=MMDVM Push Notifier (Pi-Star)
 Documentation=https://github.com/fnshiwu/MMDVM-Push-Notifier
 After=network-online.target time-sync.target mmdvmhost.service
-Wants=network-online.target
+Wants=network-online.target time-sync.target
 # systemd 252+ (Debian 12 Bookworm): rate limiting lives in [Unit]
 StartLimitIntervalSec=300
 StartLimitBurst=5

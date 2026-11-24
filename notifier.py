@@ -27,6 +27,8 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Dict, Optional, Tuple
 
 # Import constants from config module | 从 config 模块导入常量
@@ -107,6 +109,10 @@ class PushService:
     _stats_lock = threading.Lock()
     _stats = {"ok": 0, "failed": 0, "dropped": 0, "skipped": 0, "tls_downgraded": 0}
     _recent_failures = collections.deque(maxlen=10)
+    # Last HTTP Date seen from any endpoint | 最近一次响应里的服务器时间
+    # Used to recover from an unsynchronised system clock on cold boot (Feishu 19021).
+    _date_lock = threading.Lock()
+    _last_server_date: Optional[str] = None
 
     # ---------- executor ----------
     @classmethod
@@ -152,6 +158,15 @@ class PushService:
             req.add_header("Content-Type", "application/json; charset=utf-8")
         try:
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=ctx) as resp:
+                # Remember the server's Date header: on a cold boot the Pi has no
+                # RTC and its clock can be hours off. Signed webhooks then reject
+                # the timestamp; the header lets us retry with the real time.
+                # 记住服务器 Date 头：冷启动无 RTC 时本机时钟可能差几小时，
+                # 签名型 Webhook 会拒绝时间戳；据此可用服务器时间重试。
+                date_hdr = resp.headers.get("Date") if hasattr(resp, "headers") else None
+                if date_hdr:
+                    with cls._date_lock:
+                        cls._last_server_date = date_hdr
                 return "ok", resp.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
             detail = ""
@@ -270,13 +285,34 @@ class PushService:
                 return data[key]
         return default
 
+    @staticmethod
+    def _clock_skew_message() -> str:
+        """Actionable hint shown when Feishu rejects our timestamp | 时钟偏差提示"""
+        return ("系统时钟与网络时间相差超过 1 小时（本机无 RTC，冷启动未校时），"
+                "飞书签名被拒；请启用 NTP 校时。已尝试用服务器时间重签。")
+
+    @classmethod
+    def _server_timestamp(cls) -> Optional[str]:
+        """Epoch seconds parsed from the last HTTP Date header | 从响应头解析服务器秒级时间"""
+        with cls._date_lock:
+            header = cls._last_server_date
+        if not header:
+            return None
+        try:
+            parsed = parsedate_to_datetime(header)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return str(int(parsed.timestamp()))
+        except (TypeError, ValueError, OverflowError):
+            return None
+
     # ---------- platform push ----------
     @classmethod
     def _push_feishu(cls, config: Dict, type_label: str, body_text: str, is_voice: bool) -> bool:
+        log = logging.getLogger(__name__)
         try:
-            ts = str(int(time.time()))
             template = "blue" if is_voice else ("orange" if "上线" in type_label else "green")
-            fs_payload = {
+            base_payload = {
                 "msg_type": "interactive",
                 "card": {
                     "header": {"title": {"tag": "plain_text", "content": type_label},
@@ -285,23 +321,53 @@ class PushService:
                                   "text": {"tag": "lark_md", "content": html_to_lark_md(body_text)}}]
                 }
             }
-            if config.get("fs_secret"):
-                fs_payload["timestamp"] = ts
-                fs_payload["sign"] = cls.get_fs_sign(config["fs_secret"], ts)
+            secret = config.get("fs_secret")
+
+            def sign_and_send(ts: Optional[str]) -> Tuple[bool, str]:
+                payload = dict(base_payload)
+                if secret and ts:
+                    payload["timestamp"] = ts
+                    payload["sign"] = cls.get_fs_sign(secret, ts)
+                return cls._http_post(config["fs_webhook"],
+                                      data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                                      is_json=True, allow_insecure=False)
+
             # The hook id inside the URL is a credential: no unverified TLS for it.
             # hook id 在 URL 里，属于凭据，禁止降级到不校验的 TLS。
-            ok, body = cls._http_post(config["fs_webhook"],
-                                      data=json.dumps(fs_payload, ensure_ascii=False).encode("utf-8"),
-                                      is_json=True, allow_insecure=False)
+            ok, body = sign_and_send(str(int(time.time())))
             if not ok:
                 return False
             code = cls._json_field(body, "code", "StatusCode")
             if code in (0, "0"):
                 return True
-            logging.getLogger(__name__).error("Feishu rejected push: %s", body[:200])
+
+            # Feishu 19021 = sign mismatch OR timestamp outside ±1h. On a cold
+            # boot with no RTC the local clock is the likely culprit, so retry
+            # once using the server's Date header instead of blaming the secret.
+            # 19021 = 签名不符或时间戳偏差超 1 小时。冷启动无 RTC 时多为本机时钟问题，
+            # 用服务器 Date 头重签一次，不要直接归咎于密钥填错。
+            if str(code) == "19021" or "timestamp is not within one hour" in body:
+                log.error("Feishu rejected push: code 19021. %s", cls._clock_skew_message())
+                server_ts = cls._server_timestamp()
+                local_ts = str(int(time.time()))
+                if secret and server_ts and server_ts != local_ts:
+                    log.info("Retrying Feishu push with server timestamp %s (local %s)",
+                             server_ts, local_ts)
+                    ok2, body2 = sign_and_send(server_ts)
+                    if ok2 and cls._json_field(body2, "code", "StatusCode") in (0, "0"):
+                        log.info("Feishu push delivered using server time; enable NTP to "
+                                 "avoid startup delay and future mismatches")
+                        return True
+                    log.error("Feishu rejected push after clock correction: %s", body2[:200])
+                else:
+                    log.warning("No usable server Date header or no signing secret; "
+                                "cannot correct the timestamp automatically")
+                return False
+
+            log.error("Feishu rejected push: %s", body[:200])
             return False
         except Exception as e:
-            logging.getLogger(__name__).error("Feishu push failed: %s", e)
+            log.error("Feishu push failed: %s", e)
             return False
 
     @classmethod

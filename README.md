@@ -13,6 +13,13 @@
 Designed for long-term, unattended operation on Pi-Star systems. Validated on **Pi-Star 4.3.7 (Debian 12 Bookworm)** and still compatible with **Pi-Star 4.2.x (Bullseye)**.  
 本项目面向 Pi-Star 的长期稳定运行场景设计，已在 Pi-Star 4.3.7（Debian 12 Bookworm）实机验证，并向下兼容 4.2.x。
 
+> **v3.6.4 更新重点（冷启动校时 / 飞书 19021 修复版）**
+> * 修复 Pi-Star 冷启动无 RTC 导致时钟未校时、飞书签名被拒（`19021: timestamp is not within one hour`）的问题
+> * 启动通知前等待 NTP 校时（默认最多 60 秒，可用 `clock_sync_wait` 配置，0 表示关闭），无论如何都不会阻塞日志监听
+> * 飞书签名被拒时，用响应头 `Date` 表示的服务器时间重签并重试一次；日志明确提示「系统时钟未同步，请启用 NTP」，不再误判为密钥错误
+> * 安装/更新脚本幂等启用 systemd 时间同步（`timedatectl set-ntp true` + `systemd-timesyncd`），systemd 单元增加 `Wants=time-sync.target`
+> * 测试从 86 项增加到 97 项
+>
 > **v3.6.3 更新重点（安装/卸载修复版）**
 > * 修复卸载后重新安装时 `/admin/` 返回 HTTP 500：安装脚本不再把 `echo` 插进另一条 `echo` 的字符串中间，改为在行首插入独立语句；卸载脚本先恢复备份再删除，并遍历所有候选 `index.php`
 > * 修复 PHP 语法被注释锚点破坏的问题，`php -l` 校验纳入恢复流程

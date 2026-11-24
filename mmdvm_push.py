@@ -20,6 +20,7 @@ import atexit
 import tempfile
 import platform
 import threading
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional, Any, List
 
@@ -35,7 +36,7 @@ from config import ConfigManager
 # =========================
 # Global Constants | 全局常量
 # =========================
-VERSION = "v3.6.3"
+VERSION = "v3.6.4"
 CONFIG_FILE = os.environ.get("MMDVM_PUSH_CONFIG", "/etc/mmdvm_push.json")
 LOCAL_ID_FILE = "/usr/local/etc/nextionUsers.csv"
 
@@ -51,6 +52,12 @@ MAX_LOG_ITERATIONS = 200000    # Max read loop iterations before reopening
 STALE_LOG_WARN = 900           # Warn if the MMDVM log has not been written for 15 min
 BOOT_NOTICE_ATTEMPTS = 5
 BOOT_NOTICE_INTERVAL = 6
+# A cold-booted Pi-Star has no RTC. Give NTP a bounded window to correct the
+# clock before sending signed pushes (Feishu rejects >1h skew with code 19021).
+# 冷启动无 RTC，给 NTP 一个有上限的窗口校时，再发签名推送。
+CLOCK_SYNC_WAIT = 60          # Maximum seconds to wait | 最长等待秒数
+CLOCK_SYNC_POLL = 2           # Check interval | 检查间隔
+CLOCK_SYNC_WAIT_KEY = "clock_sync_wait"  # Config override | 配置覆盖键
 
 RUNNING = True
 
@@ -287,6 +294,46 @@ class MMDVMMonitor:
         return False
 
     # ---------- system helpers ----------
+    @staticmethod
+    def _system_clock_synced() -> bool:
+        """True when the OS reports a synchronised clock | 系统时钟是否已同步"""
+        if os.path.exists("/run/systemd/timesync/synchronized"):
+            return True
+        try:
+            proc = subprocess.run(
+                ["timedatectl", "show", "-p", "SystemClockSynchronized", "--value"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=3, check=False)
+            return proc.stdout.strip().lower() == "yes"
+        except (OSError, subprocess.SubprocessError):
+            return False
+
+    def _wait_for_clock_sync(self, conf: Dict):
+        """Wait briefly for NTP on cold boot, then continue regardless.
+
+        The notifier can fall back to the server's Date header, so an
+        unsynchronised clock must never block the monitor loop indefinitely.
+        """
+        try:
+            wait_max = float(conf.get(CLOCK_SYNC_WAIT_KEY, CLOCK_SYNC_WAIT))
+        except (TypeError, ValueError):
+            wait_max = float(CLOCK_SYNC_WAIT)
+        wait_max = max(0.0, min(wait_max, 300.0))
+        if wait_max <= 0:
+            return
+        if self._system_clock_synced():
+            logger.info("System clock already synchronized")
+            return
+        logger.warning("System clock not synchronized; waiting up to %.0fs for NTP", wait_max)
+        deadline = time.monotonic() + wait_max
+        while RUNNING and time.monotonic() < deadline:
+            time.sleep(min(CLOCK_SYNC_POLL, max(0.1, deadline - time.monotonic())))
+            if self._system_clock_synced():
+                logger.info("System clock synchronized after NTP wait")
+                return
+        logger.warning("System clock still not synchronized. Enable NTP (install.sh "
+                       "does this automatically); signed pushes will retry with server time")
+
     def _send_boot_notice(self, conf: Dict, network_ok: bool):
         if not PushService.has_channel(conf):
             logger.warning("Boot notice skipped: no push channel enabled yet")
@@ -325,6 +372,7 @@ class MMDVMMonitor:
 
         network_ok = self.check_network()
         if conf.get('boot_push_enabled', True):
+            self._wait_for_clock_sync(conf)
             self._send_boot_notice(conf, network_ok)
 
         logger.info("%s Monitor ready, tailing logs...", VERSION)

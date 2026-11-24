@@ -245,6 +245,27 @@ fi
 chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null
 
 # =========================
+# 8.6) Time synchronisation | 系统时间同步
+# =========================
+# Cold boot without NTP produces a stale clock, and Feishu rejects signed
+# pushes with code 19021. Enable NTP non-fatally on every update.
+# 冷启动无 NTP 会导致时钟过期，飞书以 19021 拒绝签名推送。每次更新幂等启用。
+if command -v timedatectl >/dev/null 2>&1; then
+    timedatectl set-ntp true 2>/dev/null || true
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl enable --now systemd-timesyncd.service >/dev/null 2>&1 || true
+fi
+if command -v timedatectl >/dev/null 2>&1; then
+    SYNC_STATE=$(timedatectl show -p SystemClockSynchronized --value 2>/dev/null || echo "unknown")
+    if [ "$SYNC_STATE" = "yes" ]; then
+        ok "系统时钟已同步"
+    else
+        warn "系统时钟尚未同步；启动推送会等待校时并用服务器时间重签"
+    fi
+fi
+
+# =========================
 # 9) Restart + status | 重启并检查
 # =========================
 echo "正在重启服务..."

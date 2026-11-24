@@ -165,5 +165,22 @@ class TestUninstallCleanup(unittest.TestCase):
             self.assertIn(path, body)
 
 
+class TestTimeSyncSetup(unittest.TestCase):
+    def test_install_enables_ntp(self):
+        body = (ROOT / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("timedatectl set-ntp true", body)
+        self.assertIn("systemctl enable --now systemd-timesyncd.service", body)
+
+    def test_update_enables_ntp(self):
+        body = (ROOT / "update.sh").read_text(encoding="utf-8")
+        self.assertIn("timedatectl set-ntp true", body)
+        self.assertIn("systemctl enable --now systemd-timesyncd.service", body)
+
+    def test_service_waits_for_time_sync(self):
+        unit = (ROOT / "mmdvm_push.service").read_text(encoding="utf-8")
+        self.assertIn("After=network-online.target time-sync.target", unit)
+        self.assertIn("Wants=network-online.target time-sync.target", unit)
+
+
 if __name__ == "__main__":
     unittest.main()

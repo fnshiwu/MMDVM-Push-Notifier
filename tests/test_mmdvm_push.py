@@ -188,5 +188,45 @@ class TestHealthHelpers(unittest.TestCase):
         self.assertTrue(status["parser_selftest"])
 
 
+class TestClockSync(unittest.TestCase):
+    """Cold boot / no RTC: wait for NTP but never block the monitor forever."""
+
+    def test_clock_sync_wait_is_bounded_and_configurable(self):
+        self.assertGreater(m.CLOCK_SYNC_WAIT, 0)
+        monitor = m.MMDVMMonitor()
+        original = monitor._system_clock_synced
+        try:
+            monitor._system_clock_synced = staticmethod(lambda: True)
+            monitor._wait_for_clock_sync({})  # synced: returns immediately
+            monitor._system_clock_synced = staticmethod(lambda: False)
+            start = time.monotonic()
+            monitor._wait_for_clock_sync({m.CLOCK_SYNC_WAIT_KEY: 0.3})
+            self.assertLess(time.monotonic() - start, 2.0)
+        finally:
+            monitor._system_clock_synced = original
+
+    def test_disable_clock_wait_with_zero(self):
+        monitor = m.MMDVMMonitor()
+        original = monitor._system_clock_synced
+        try:
+            calls = []
+            monitor._system_clock_synced = staticmethod(lambda: calls.append(1) or False)
+            monitor._wait_for_clock_sync({m.CLOCK_SYNC_WAIT_KEY: 0})
+            self.assertEqual(calls, [], "zero must skip clock checks entirely")
+        finally:
+            monitor._system_clock_synced = original
+
+    def test_negative_wait_is_clamped(self):
+        monitor = m.MMDVMMonitor()
+        original = monitor._system_clock_synced
+        try:
+            monitor._system_clock_synced = staticmethod(lambda: False)
+            start = time.monotonic()
+            monitor._wait_for_clock_sync({m.CLOCK_SYNC_WAIT_KEY: -5})
+            self.assertLess(time.monotonic() - start, 1.0)
+        finally:
+            monitor._system_clock_synced = original
+
+
 if __name__ == '__main__':
     unittest.main()

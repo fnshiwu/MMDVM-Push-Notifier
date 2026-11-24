@@ -134,5 +134,65 @@ class TestTlsPolicy(unittest.TestCase):
         self.assertEqual(PushService._insecure_uses, before + 1)
 
 
+class TestClockSkewRecovery(unittest.TestCase):
+    """Cold boot with no RTC: Feishu 19021 must be explained and corrected."""
+
+    def setUp(self):
+        self.cfg = {
+            "push_fs_enabled": True, "fs_webhook": "https://open.feishu.cn/hook/x",
+            "fs_secret": "SEC", "push_wx_enabled": False, "wx_token": "",
+            "push_tg_enabled": False, "tg_token": "", "tg_chat_id": "",
+        }
+        self._orig_http = PushService._http_post
+        self._orig_date = PushService._last_server_date
+        self.responses = []
+        self.payloads = []
+
+    def tearDown(self):
+        PushService._http_post = self._orig_http
+        PushService._last_server_date = self._orig_date
+
+    def _fake_post(self, url, data=None, **kwargs):
+        self.payloads.append(data.decode() if isinstance(data, bytes) else data)
+        return self.responses.pop(0)
+
+    def test_19021_retries_with_server_timestamp(self):
+        import json
+        self.responses = [
+            (True, '{"code":19021,"msg":"sign match fail or timestamp is not within one hour"}'),
+            (True, '{"code":0,"msg":"ok"}'),
+        ]
+        PushService._last_server_date = "Tue, 24 Nov 2026 07:09:30 GMT"
+        PushService._http_post = classmethod(lambda cls, *a, **k: self._fake_post(*a, **k))
+        self.assertTrue(PushService._push_feishu(self.cfg, "t", "b", False))
+        self.assertEqual(len(self.payloads), 2)
+        first = json.loads(self.payloads[0])
+        second = json.loads(self.payloads[1])
+        self.assertEqual(second["timestamp"], "1795504170")
+        self.assertNotEqual(first["timestamp"], second["timestamp"])
+        self.assertNotEqual(first["sign"], second["sign"])
+
+    def test_19021_without_server_date_fails(self):
+        self.responses = [
+            (True, '{"code":19021,"msg":"timestamp is not within one hour from current time"}'),
+        ]
+        PushService._last_server_date = None
+        PushService._http_post = classmethod(lambda cls, *a, **k: self._fake_post(*a, **k))
+        self.assertFalse(PushService._push_feishu(self.cfg, "t", "b", False))
+        self.assertEqual(len(self.payloads), 1)
+
+    def test_helpful_message_mentions_ntp(self):
+        self.assertIn("NTP", PushService._clock_skew_message())
+        self.assertIn("系统时钟", PushService._clock_skew_message())
+
+    def test_server_timestamp_parses_header(self):
+        PushService._last_server_date = "Tue, 24 Nov 2026 07:09:30 GMT"
+        self.assertEqual(PushService._server_timestamp(), "1795504170")
+
+    def test_bad_date_header_returns_none(self):
+        PushService._last_server_date = "not-a-date"
+        self.assertIsNone(PushService._server_timestamp())
+
+
 if __name__ == '__main__':
     unittest.main()
