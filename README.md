@@ -1,4 +1,4 @@
-<h1 align="center">MMDVM-Push-Notifier　<a href="#cn">中文</a> | <a href="#en">English</a></h1>
+<h1 align="center">MMDVM-Push-Notifier　<small><a href="#cn">中文</a> | <a href="#en">English</a></small></h1>
 
 <p align="center">
   A high-performance notification system for Pi-Star / MMDVM<br>
