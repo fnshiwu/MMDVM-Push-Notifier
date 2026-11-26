@@ -13,8 +13,8 @@
 
 ---
 
-<details>
-<summary><img src="https://img.shields.io/badge/阅读-中文-de3618?style=for-the-badge" alt="中文"></summary>
+<details id="cn">
+<summary align="center"><a href="#cn"><u>中文文档</u></a></summary>
 
 # 🇨🇳 中文
 
@@ -260,8 +260,8 @@ sudo bash uninstall.sh
 
 </details>
 
-<details>
-<summary><img src="https://img.shields.io/badge/Read%20in-English-1f6feb?style=for-the-badge" alt="English"></summary>
+<details id="en">
+<summary align="center"><a href="#en"><u>English Document</u></a></summary>
 
 # 🇬🇧 English
 
