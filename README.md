@@ -1,4 +1,4 @@
-# MMDVM-Push-Notifier
+<h1 align="center">MMDVM-Push-Notifier　<a href="#cn">中文</a> | <a href="#en">English</a></h1>
 
 <p align="center">
   A high-performance notification system for Pi-Star / MMDVM<br>
@@ -13,9 +13,7 @@
 
 ---
 
-<details id="cn" open>
-<summary style="list-style: none" align="center"><a href="#cn" style="text-decoration: none"><u>中文</u></a></summary>
-
+<a id="cn"></a>
 # 🇨🇳 中文
 
 面向 Pi-Star 的长期稳定运行场景设计，已在 **Pi-Star 4.3.7（Debian 12 Bookworm）** 实机验证，并向下兼容 **Pi-Star 4.2.x（Bullseye）**。
@@ -258,11 +256,9 @@ sudo bash uninstall.sh
 * Callsign: **BA4SMQ**
 * QTH: Jiangsu Funing, China
 
-</details>
 
-<details id="en">
-<summary style="list-style: none" align="center"><a href="#en" style="text-decoration: none"><u>English</u></a></summary>
 
+<a id="en"></a>
 # 🇬🇧 English
 
 Designed for long-term, unattended operation on Pi-Star systems. Validated on **Pi-Star 4.3.7 (Debian 12 Bookworm)** and still compatible with **Pi-Star 4.2.x (Bullseye)**.
@@ -507,4 +503,4 @@ sudo bash uninstall.sh
 
 ---
 
-</details>
+
