@@ -13,8 +13,8 @@
 
 ---
 
-<details id="cn">
-<summary align="center"><a href="#cn"><u>中文文档</u></a></summary>
+<details id="cn" open>
+<summary style="list-style: none" align="center"><a href="#cn" style="text-decoration: none"><u>中文</u></a></summary>
 
 # 🇨🇳 中文
 
@@ -261,7 +261,7 @@ sudo bash uninstall.sh
 </details>
 
 <details id="en">
-<summary align="center"><a href="#en"><u>English Document</u></a></summary>
+<summary style="list-style: none" align="center"><a href="#en" style="text-decoration: none"><u>English</u></a></summary>
 
 # 🇬🇧 English
 
